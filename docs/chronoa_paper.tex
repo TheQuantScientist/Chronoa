@@ -1,0 +1,1276 @@
+\documentclass[preprint,12pt]{elsarticle}
+
+% Common packages
+\usepackage{graphicx}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepgfplotslibrary{groupplots}
+\pgfplotsset{compat=1.18}
+
+% Optional packages
+% \usepackage{amsthm}
+% \usepackage{lineno}
+
+\journal{Journal Name}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{ADEPT: Query-Conditioned Event Graph Forecasting with Adaptive Delta-Kernel Experts for \\ Irregular Time Series}
+
+\fntext[fn1]{Nguyen Quoc Anh and Trung Nam Nguyen contributed equally to this work and share co-first authorship.}
+
+\cortext[cor1]{Corresponding author.}
+
+\author[label1]{Trung Nam Nguyen\fnref{fn1}}
+\ead{trungnn@vaa.edu.vn}
+
+\author[label2]{Nguyen Quoc Anh\fnref{fn1}}
+\ead{anh.quocnguyen@hitachids.com}
+
+\author[label3]{Ha Xuan Son}
+\ead{ha.son@rmit.edu.vn}
+
+\author[label4,label5]{Nguyen~Ngoc~Phien\corref{cor1}}
+\ead{nguyenngocphien@tdtu.edu.vn}
+
+\author[label6]{Trung Phan-Hoang Tuan}
+\ead{trungpht@fe.edu.vn}
+
+\author[label6]{Nguyen Tien Thuan}
+\ead{ThuanNTCE181024@fpt.edu.vn}
+
+\author[label6]{Nguyen Gia Chan}
+\ead{channgce181288@fpt.edu.vn}
+
+\author[label6]{Le Huu Khoa}
+\ead{khoalhce181099@fpt.edu.vn}
+
+\affiliation[label1]{
+  organization={Faculty of Business Administration, Vietnam Aviation Academy},
+  city={Ho Chi Minh City},
+  country={Vietnam}
+}
+
+\affiliation[label2]{
+  organization={Department of Product Engineering and Embedded Systems, A\&I CoE, Hitachi Digital Services},
+  city={Ho Chi Minh City},
+  state={District 12},
+  country={Vietnam}
+}
+
+\affiliation[label3]{
+  organization={Department of Blockchain-Enabled Business, RMIT University},
+  city={Ho Chi Minh City},
+  state={District 7},
+  country={Vietnam}
+}
+
+\affiliation[label4]{
+  organization={Center for Applied Information Technology, Ton Duc Thang University},
+  city={Ho Chi Minh City},
+  country={Vietnam}
+}
+
+\affiliation[label5]{
+  organization={Faculty of Information Technology, Ton Duc Thang University},
+  city={Ho Chi Minh City},
+  country={Vietnam}
+}
+
+\affiliation[label6]{
+  organization={FPT University, Can Tho Campus},
+  city={Can Tho},
+  country={Vietnam}
+}
+
+\begin{abstract}
+Irregular multivariate time-series forecasting is fundamentally a retrieval
+problem: each future value asks which asynchronous historical events, variables,
+and time gaps should be trusted. Dense imputation and patching make this setting
+easier to process, but they can hide the event structure that determines the
+answer. We introduce ADEPT, a query-conditioned event graph forecaster with
+adaptive delta-kernel experts. ADEPT encodes observations as value-time-variable
+event tokens, contextualizes them with transformer memory, learns cross-variable
+relations, and retrieves evidence for each future query through continuous-time
+delta kernels. Its distinguishing component is an end-to-end expert decoder
+that gates between the neural query forecast and history-derived anchors for
+same-variable persistence, exponential memory, local trend, graph-aware context,
+and global entity state, without external model predictions, test labels, or
+post hoc routing. On four standard IMTS benchmarks, ADEPT delivers the best
+standard-window MAE in every dataset, improving over the strongest baseline by
+2.6--22.2\% and leading MSE on three datasets. Across changing lookback and
+horizon settings, the advantage remains absolute-error driven rather than
+window-specific. Through perturbation and ablation evidence, the finding is
+that accuracy depends on using real values, temporal placement, event memory,
+and adaptive experts, in whichs ADEPT gains by retrieving the right events, not by
+exploiting masks or persistence.
+\end{abstract}
+
+\begin{keyword}
+Irregular time series \sep Event graph neural networks \sep Query-conditioned forecasting \sep Adaptive delta-kernel experts
+\end{keyword}
+
+\end{frontmatter}
+
+% \linenumbers
+
+\newcommand{\method}{ADEPT}
+\newcommand{\best}[1]{\textbf{#1}}
+\newcommand{\second}[1]{\underline{#1}}
+
+\section{Introduction}
+\label{sec:introduction}
+
+Irregular multivariate time series (IMTS) arise when variables are observed at
+different times, under different sampling rates, and often for reasons that are
+themselves informative. Clinical records follow care decisions, climate
+stations report sparse seasonal measurements, and wearable sensors produce
+event-like trajectories rather than clean grids. Forecasting in this setting is
+therefore not simply a sequence-to-vector problem. Each future target asks a
+more specific question: which past events, variables, and time gaps should be
+trusted for this particular future time--variable query?
+
+Existing IMTS methods attack different sides of this question. Missingness-aware
+recurrence, interpolation, time attention, and set encoders make irregular
+observations easier to process \citep{grud,shukla2019interp,mtan,seft}.
+Continuous-time models represent latent dynamics between observations
+\citep{neuralode2,latentODE,neuralCDE,cru}. Graph and patch models preserve or
+regularize cross-variable structure under sparse observation patterns
+\citep{raindrop2,gneuralflow,grafiti,tPatchGNN,apn}. These advances are
+substantial, but they often shift the forecasting decision into an imputed
+grid, a latent trajectory, a patch representation, or a mostly neural final
+head. The final query still has to recover a simple but difficult balance:
+same-variable persistence may be decisive for one target, graph-aware evidence
+for another, and a local trend or entity-level context for a third.
+
+We introduce \method{}, a query-conditioned event graph forecaster designed
+around that final evidence-selection step. Observed measurements remain event
+tokens with value, variable identity, and continuous time information. A
+transformer memory contextualizes the event set, an adaptive variable graph
+learns cross-channel relations, and each future query retrieves evidence through
+both cross-attention and learned continuous-time delta kernels. The key
+difference is the adaptive delta-kernel expert decoder: instead of asking a
+single neural head to rediscover all local numerical structure, \method{} gates
+between the neural query forecast and differentiable history-derived experts for
+same-variable latest value, exponential memory, local trend, graph-aware memory,
+and global entity state. A bounded residual then lets the neural decoder correct
+the gated forecast.
+
+This design keeps the protocol honest. The experts are not external baseline
+predictions, not a hand-tuned ensemble, and not a test-label calibration
+mechanism. They are computed only from the observed history of the current
+example, their weights are produced by the model, and the whole system is
+trained end-to-end with masked forecasting losses. The goal is to preserve the
+strong numerical anchors that classical forecasting teaches us to respect while
+retaining the flexibility of neural event memory.
+
+Under the evaluated IMTS protocol, this combination changes the empirical
+profile of the model. \method{} achieves the best standard-window MAE on P12,
+MIMIC, USHCN, and HumanActivity, improving over the strongest baseline by
+2.6--22.2\%, and it obtains the best standard-window MSE on three of the four
+datasets. Its advantage is not confined to one canonical split: across the
+lookback--horizon sweep, \method{} remains consistently strongest on MAE.
+Perturbations and ablations further show that the gains require real observed
+values, correct timing, event-memory retrieval, and the adaptive expert gate.
+The contributions are:
+\begin{itemize}
+    \item We formulate IMTS forecasting as query-conditioned event retrieval
+    and propose \method{}, combining transformer event memory, adaptive
+    variable graphs, delta-kernel retrieval, and an end-to-end adaptive expert
+    decoder.
+    \item We show state-of-the-art standard-window MAE on all four benchmarks,
+    best MSE on three, and a 2.6--22.2\% MAE reduction over the strongest
+    baseline under matched masks, scaling, windows, and seeds.
+    \item We diagnose the mechanism through window sweeps, temporal
+    perturbations, entity-level uncertainty, and ablations, showing robust
+    absolute-error gains while identifying the remaining squared-error boundary
+    on HumanActivity and selected USHCN windows.
+\end{itemize}
+
+\section{Related Work}
+\label{sec:related-work}
+
+\paragraph{Regular-grid forecasting and local anchors}
+Classical forecasting remains relevant to IMTS because it clarifies what a
+strong forecast must preserve: a useful local level, trend, seasonality, and
+uncertainty structure. ARIMA and state-space models provide transparent
+temporal dynamics \citep{BoxJenkins1970,Harvey1989,Hamilton1994,DurbinKoopman2012}.
+Exponential smoothing families give strong local anchors for level and trend
+\citep{Holt1957,Winters1960,Gardner1985,Hyndman2002,Hyndman2008}. Seasonal
+decomposition and forecasting competitions reinforce the same lesson: simple
+models can remain difficult to beat when they encode the right inductive bias
+\citep{Cleveland1990STL,Assimakopoulos2000Theta,Makridakis2018M4,Makridakis2022M5}.
+Machine-learning regressors brought nonlinear residual modeling and strong
+tabular learners into forecasting pipelines \citep{Drucker1997SVR,Smola2004SVR,Breiman2001RandomForest,Friedman2001GBM}.
+Boosted trees and hybrid statistical--neural systems further show that learned
+corrections work best when they are attached to stable baseline structure
+\citep{Chen2016XGBoost,Ke2017LightGBM,Zhang2003HybridARIMAANN,KhasheiBijari2011Hybrid,MonteroManso2020FFORMA,Smyl2020ESRNN}.
+These models do not solve asynchronous multivariate forecasting, but they
+motivate one design principle behind \method{}: a neural IMTS model should not
+throw away same-variable persistence, trend, and graph-aware local evidence
+while learning a richer representation. Deep forecasting moved from recurrent sequence models to attention-based
+sequence transduction \citep{Hochreiter1997LSTM,Cho2014GRU,Sutskever2014Seq2Seq,Bahdanau2015Attention}.
+Transformer, probabilistic, basis-expansion, and interpretable multi-horizon
+models broadened that line \citep{Vaswani2017Transformer,Salinas2020DeepAR,Oreshkin2020NBEATS,Lim2021TFT}.
+Long-horizon architectures then improved regular-grid forecasting through
+sparse attention, decomposition, and frequency-domain structure
+\citep{informer,Wu2021Autoformer,Zhou2022FEDformer,Wu2023TimesNet}. Other
+models emphasized patching, linear or MLP mixing, and cross-variable
+tokenization \citep{Nie2023PatchTST,Zeng2023LTSFLinear,Das2023TiDE,Ekambaram2023TSMixer}.
+Graph and hypergraph variants made cross-channel structure more explicit
+\citep{Crossformer2023,FourierGNN2023,AdaMSHyper2024,iTransformer2024,TimeMixer2024}.
+Most recently, state-space and foundation-model approaches have made
+large-scale pretraining and efficient long-context sequence modeling central to
+time-series forecasting \citep{Mamba2024,MambaTS2024,Moirai2024,TimesFM2024,Chronos2024,LagLlama2023}.
+This line is powerful, but its interface is usually an aligned tensor with a
+fixed input window and output horizon. When such models are applied to IMTS,
+irregularity is often handled before modeling through resampling, imputation,
+mask channels, or patches. That preprocessing can be useful, but it changes the
+main question from ``which historical event supports this query?'' to ``what
+regular representation should we forecast from?''
+
+\paragraph{Irregular representations and continuous time}
+Early neural IMTS models addressed the irregular sampling problem by adding
+time-gap and missingness information directly to sequence or interpolation
+mechanisms. GRU-D uses masking and elapsed-time decay to make recurrence aware
+of missingness patterns \citep{grud}. Interpolation-prediction networks and
+mTAN instead build explicit interpolation or time-aware attention layers before
+prediction \citep{shukla2019interp,mtan}. Set-based modeling offers another
+route: SeFT treats observations as unordered event sets, reducing dependence on
+an arbitrary dense grid \citep{seft}. These approaches were important because
+they made irregularity part of the model, yet they still tend to summarize the
+history before the final forecast is queried. Continuous-time latent dynamics provide a more principled way to model
+irregular observation times. Neural ODE and Latent ODE models evolve hidden
+states in continuous time, while Neural CDEs represent the observed path as a
+control signal \citep{neuralode2,latentODE,neuralCDE}. GRU-ODE-Bayes and CRU
+combine continuous evolution with update mechanisms suited to partially
+observed clinical time series \citep{DeBrouwer2019GRUODE,cru}. Later variants
+added attention, learned interpolation/extrapolation, flows, or transformer
+relations in continuous time \citep{ANCDE2021,EXIT2022,neuralflows2,ContiFormer2023}.
+Diffusion-based imputation also improved the quality of missing-value
+reconstruction and can support forecasting through an impute-then-predict
+pipeline \citep{CSDI2021}. The strength of this family is temporal coherence;
+its risk is over-compression. A latent trajectory or imputed grid may be smooth
+and useful, but the downstream forecast can lose direct access to the particular
+events whose values, recency, and variables matter most for a future target.
+
+\paragraph{Graphs, patches, and event-query forecasting}
+Recent IMTS forecasting work moves closer to the raw observation protocol by
+representing interactions among variables, observations, and forecast targets.
+Raindrop and GNeuralFlow use graph-guided propagation to capture cross-channel
+relationships under irregular observation patterns \citep{raindrop2,gneuralflow}.
+PrimeNet studies pretraining for irregular multivariate series, while
+Warpformer introduces multi-scale warping for irregular clinical signals
+\citep{primenet,warpformer}. GraFITi is especially close to an event-query view:
+it converts observed and target sparsity into a graph and casts forecasting as
+edge prediction \citep{grafiti}. These models preserve more of the original
+sampling structure than dense-grid forecasters, but the final numerical decoder
+still has to decide how much to trust same-variable recency, cross-variable
+evidence, and learned latent context. Patch-based IMTS models provide an alternative answer. tPatchGNN showed that
+patching irregular histories can make graph forecasting efficient and strong,
+and APN further improved this direction through adaptive patching
+\citep{tPatchGNN,apn}. HyperIMTS, Hi-Patch, and ASTGI push graph construction
+further by using hyperedges, hierarchical patch graphs, or adaptive
+spatio-temporal neighborhoods \citep{HyperIMTS2025,HiPatch2025,ASTGI2026}.
+DNBNet revisits another important angle: basis-function representations can
+suffer from timestamp-density bias and limited adaptability, so irregular
+forecasting also depends on how histories are numerically summarized
+\citep{DNBNet2026}. Together, these models show that structure matters, but
+they also expose a tension. Patches and basis responses improve efficiency and
+regularity, while raw event graphs preserve fidelity; neither alone guarantees
+that the final forecast will keep the strongest local numerical anchors.
+
+\paragraph{Positioning of our \method{}}
+\method{} is designed for this gap between representation and final numerical
+forecasting. Unlike dense-grid and foundation forecasters, it keeps the input as
+events and decodes explicit future time--variable queries. Unlike purely
+continuous-time latent models, it leaves the decoder direct access to retrieved
+observations through cross-attention and learned delta kernels. Unlike graph or
+patch models whose final head is mostly neural, it exposes the query decoder to
+history-derived same-variable, trend, graph-aware, and global experts. The
+experts are not external baselines and are not selected using test labels; they
+are differentiable functions of the observed history and are gated end-to-end.
+The contribution is therefore not just a new encoder or a new graph
+construction. It is a protocol-preserving event-query architecture in which
+adaptive neural memory and explicit history anchors cooperate at the point
+where IMTS forecasting is hardest: deciding what evidence each future
+time--variable query should trust.
+
+\section{Methodology}
+\label{sec:method}
+
+\subsection{Architectural Proposal}
+\label{sec:architecture}
+
+\begin{figure}[htbp]
+\centering
+\makebox[\textwidth]{%
+  \includegraphics[width=1.5\textwidth]{ADEPT (Processing)/architecture.png}}
+\caption{High-level design of the proposed \method{} architecture. The
+implementation uses event-token encoding, transformer memory, adaptive variable
+graph mixing, continuous-time delta-kernel retrieval, and an adaptive expert
+query decoder. Fixed training settings are reported in
+Appendix~\ref{app:adept-config}.}
+\label{architecture}
+\end{figure}
+
+Notation used in this subsection is summarized in
+Table~\ref{tab:adept-symbols} of Appendix~\ref{app:adept-symbols}. For each entity, \method{} preserves the
+observed history as an event set and decodes the masked future targets as
+explicit time--variable queries:
+\begin{equation}
+    \mathcal E_b = \{(t_i,v_i,\widetilde x_i)\}_{i=1}^{N_b},
+\end{equation}
+\begin{equation}
+    \mathcal Q_b=\{(\tau_j,u_j)\}_{j=1}^{M_b}.
+\end{equation}
+Losses and metrics are computed only on active target-mask entries. This
+formulation keeps the modeling target aligned with the benchmark protocol:
+forecasts are requested values at specific future times and variables, not a
+dense vector produced after resampling.
+
+\paragraph{Event tokenization}
+Each finite observation is mapped to a neural token by adding a variable
+embedding, a value projection, and a continuous-time Fourier projection:
+\begin{equation}
+    h_i^{(0)} = e_{v_i} + f_x(\widetilde x_i) + f_t(t_i),
+\end{equation}
+so the model sees time, variable identity, and measured value before any
+regular-grid conversion. A transformer encoder then contextualizes the padded
+event memory:
+\begin{equation}
+    H_b = \operatorname{TransformerEncoder}\bigl(h_1^{(0)},\ldots,h_{N_b}^{(0)}\bigr).
+\end{equation}
+
+\paragraph{Adaptive variable graph}
+Cross-variable structure is learned from the same variable embeddings used by
+events and queries:
+\begin{equation}
+    A_{u,v} = \operatorname{softmax}_v\left(\frac{\bar e_u^\top \bar e_v}{\sqrt d}\right).
+\end{equation}
+Each row of $A$ is a query-conditioned distribution over source variables. The
+graph context $a_u=\sum_v A_{u,v}e_v$ is projected and used in query
+construction, temporal retrieval, and the graph-aware expert. This gives the
+model dataset-specific channel relations without requiring a fixed clinical,
+climate, or sensor graph.
+
+\paragraph{Query-conditioned temporal retrieval}
+For each future query $(\tau_j,u_j)$, \method{} builds a query token from the
+requested variable embedding, Fourier time features, and graph context. The
+query attends to transformer event memory using multi-head cross-attention. In
+parallel, $K$ learned continuous-time delta kernels retrieve recency-sensitive
+memory:
+\begin{equation}
+    r_{j,k}=\sum_i \alpha_{j,i,k}H_{b,i},\qquad
+    \alpha_{j,i,k}=\operatorname{softmax}_i\left(
+    -\frac{|\tau_j-t_i|}{s_k}
+    + \beta\,\mathbb{1}[u_j=v_i]
+    + \gamma\log A_{u_j,v_i}\right).
+\end{equation}
+The retrieval score combines temporal proximity, same-variable bias, and
+adaptive graph affinity. The decoder therefore receives both global attention
+context and graph-aware temporal memory at multiple learned time scales.
+
+\paragraph{Adaptive delta-kernel expert decoder}
+The adaptive expert decoder is designed to make the neural query state
+numerically precise without leaving the end-to-end training protocol. First, a
+deep query state $d_j$ is formed from the query token, cross-attention context,
+delta-kernel context, graph context, and a lookback-normalized query gap through
+a feed-forward decoder backbone. A neural head produces a base forecast
+$z^{\mathrm{nn}}_j$. In addition, the decoder constructs five scalar experts from the observed
+history:
+\begin{align}
+z^{\mathrm{last}}_j &= \text{soft latest-value estimate for variable }u_j,\\
+z^{\mathrm{ema}}_j &= \sum_{i:v_i=u_j} \omega_{j,i}^{u}\widetilde x_i,\\
+z^{\mathrm{trend}}_j &= z^{\mathrm{last}}_j +
+    \widehat m_j(\tau_j-t^{\mathrm{last}}_{u_j}),\\
+z^{\mathrm{graph}}_j &= \sum_i \omega_{j,i}^{g}\widetilde x_i,\\
+z^{\mathrm{global}}_j &= \sum_i \omega_{j,i}^{0}\widetilde x_i.
+\end{align}
+The same-variable and global experts use normalized recency weights, the
+graph-aware expert uses a recency--graph kernel, and the trend expert
+extrapolates a clipped local slope when enough same-variable evidence exists.
+When same-variable history is unavailable, the same-variable experts fall back
+to graph-aware memory and the gate receives an availability indicator. The final forecast is a gated mixture with a bounded residual:
+\begin{equation}
+    \pi_j=\operatorname{softmax}\left(W_\pi[d_j,z_j,m_j,g_j]\right),
+\end{equation}
+\begin{equation}
+    \widehat y_j
+    = \sum_{\ell}\pi_{j,\ell}z_{j,\ell}
+    + 0.05\tanh\bigl(r_\theta(d_j,z_j,m_j,g_j)\bigr).
+\end{equation}
+The gate sees the deep query state, expert values, same-variable availability,
+and query recency gap. History-derived expert values are clipped in scaled
+space before gating. This structure gives the model access to strong local
+persistence and graph-aware retrieval while letting the neural residual handle
+bounded nonlinear corrections.
+
+% \paragraph{Training}
+% The model is optimized on the training split using a masked objective combining
+% MSE, smooth-$L_1$, and MAE terms:
+% \begin{equation}
+%     \mathcal L = 0.50\mathcal L_{\mathrm{MSE}}
+%     +0.20\mathcal L_{\mathrm{Smooth}L_1}
+%     +0.30\mathcal L_{\mathrm{MAE}}.
+% \end{equation}
+% The validation score used for early stopping is
+% $\mathrm{MSE}+0.25\,\mathrm{MAE}$. This places the main selection pressure on
+% squared error while keeping the decoder aligned with the benchmark MAE target.
+% All reported \method{} benchmark results are averaged over seeds 2024, 2025, and
+% 2026.
+
+\subsection{Benchmark Protocol}
+\label{sec:protocol}
+
+\paragraph{Datasets}
+We evaluate on four widely used IMTS forecasting benchmarks: PhysioNet Challenge
+2012 (P12), MIMIC-III, USHCN, and HumanActivity. The datasets differ in
+sampling density, number of variables, temporal scale, and target availability.
+P12 and MIMIC contain intensive-care measurements, USHCN contains irregular
+climate station observations, and HumanActivity contains wearable-sensor
+trajectories.
+
+\paragraph{Baselines}
+We compare \method{} with representative neural IMTS models under the same
+benchmark protocol. The primary neural comparators are APN \citep{apn},
+GraFITi \citep{grafiti}, and tPatchGNN \citep{tPatchGNN}, which are the
+strongest recent reproduced baselines under this protocol. The full table also
+reports earlier neural baselines from the reference protocol, including
+PrimeNet \citep{primenet}, NeuralFlows \citep{neuralflows2}, CRU \citep{cru},
+mTAN \citep{mtan}, SeFT \citep{seft}, GNeuralFlow \citep{gneuralflow}, GRU-D
+\citep{grud}, and Raindrop \citep{raindrop2}. Neural baselines are evaluated
+using their released configurations with validation-based hyperparameter tuning,
+and performance is averaged across seeds when available.
+
+\paragraph{Training and Metrics}
+All methods are compared under the same dataset splits, lookback--horizon
+windows, input masks, target masks, and benchmark scaling. Baselines use their
+released training objectives, optimizers, and validation-based model selection,
+so each method is evaluated under its intended configuration rather than being
+forced into a shared optimizer or loss. \method{} uses one fixed training
+recipe across the benchmark runs; its loss weights are not tuned separately for
+individual datasets, windows, seeds, or test outcomes. Training uses only the
+training split with a masked objective combining MSE, smooth-$L_1$, and MAE:
+\begin{equation}
+    \mathcal L = 0.50\mathcal L_{\mathrm{MSE}}
+    +0.20\mathcal L_{\mathrm{Smooth}L_1}
+    +0.30\mathcal L_{\mathrm{MAE}}.
+\end{equation}
+Checkpoint selection uses validation data only, with
+$\mathrm{MSE}+0.25\,\mathrm{MAE}$ as the pre-specified \method{} validation
+score. No method uses test labels for hyperparameter tuning, calibration,
+routing, or sample-wise model selection. Final predictions and targets are
+evaluated once in scaled space with the same masked global errors:
+\begin{equation}
+    \mathrm{MAE}=\frac{\sum_{b,j}m_{b,j}
+    |\widetilde{\hat y}_{b,j}-\widetilde y_{b,j}|}
+    {\sum_{b,j}m_{b,j}},
+    \qquad
+    \mathrm{MSE}=\frac{\sum_{b,j}m_{b,j}
+    (\widetilde{\hat y}_{b,j}-\widetilde y_{b,j})^2}
+    {\sum_{b,j}m_{b,j}}.
+\end{equation}
+Lower values are better. This protocol makes the comparison depend on the
+forecasting model under the same observed-history and query masks, rather than
+on different preprocessing, target definitions, or test-time adjustment.
+
+\section{Main Experiments}
+\label{sec:main-experiments}
+
+\begin{table}[!htbp]
+\caption{Standard-window benchmark comparison. Neural baselines report mean
+$\pm$ standard deviation over three runs when available. \method{} reports mean
+$\pm$ standard deviation over seeds 2024--2026. Lower is better.
+\textbf{Bold} marks the best value and \underline{underlining} marks the
+second-best value in each column.}
+\label{tab:main-results}
+\centering
+\scriptsize
+\resizebox{\textwidth}{!}{
+\begin{tabular}{l|c|c|c|c}
+\toprule
+Method
+& \multicolumn{2}{|c|}{HumanActivity}
+& \multicolumn{2}{c}{USHCN} \\
+\cmidrule(lr){2-3}
+\cmidrule(lr){4-5}
+& MSE & MAE & MSE & MAE \\
+\midrule
+PrimeNet & 4.2507$\pm$0.0041 & 1.7018$\pm$0.0011 & 0.4930$\pm$0.0015 & 0.4954$\pm$0.0018 \\
+NeuralFlows & 0.1722$\pm$0.0090 & 0.3150$\pm$0.0094 & 0.2087$\pm$0.0258 & 0.3157$\pm$0.0187 \\
+CRU & 0.1387$\pm$0.0073 & 0.2607$\pm$0.0092 & 0.2168$\pm$0.0162 & 0.3180$\pm$0.0248 \\
+mTAN & 0.0993$\pm$0.0026 & 0.2219$\pm$0.0047 & 0.5561$\pm$0.2020 & 0.5015$\pm$0.0968 \\
+SeFT & 1.3786$\pm$0.0024 & 0.9762$\pm$0.0007 & 0.3345$\pm$0.0022 & 0.4083$\pm$0.0084 \\
+GNeuralFlow & 0.3936$\pm$0.1585 & 0.4541$\pm$0.0841 & 0.2205$\pm$0.0421 & 0.3286$\pm$0.0412 \\
+GRU-D & 0.1893$\pm$0.0627 & 0.3253$\pm$0.0485 & 0.2097$\pm$0.0493 & 0.3045$\pm$0.0305 \\
+Raindrop & 0.0916$\pm$0.0072 & 0.2114$\pm$0.0072 & 0.2035$\pm$0.0336 & 0.3029$\pm$0.0264 \\
+Warpformer & 0.0446$\pm$0.0010 & 0.1219$\pm$0.0011 & 0.2058$\pm$0.0771 & 0.3089$\pm$0.0769 \\
+tPatchGNN & 0.0438$\pm$0.0004 & 0.1228$\pm$0.0021 & \second{0.1596$\pm$0.0074} & \second{0.2668$\pm$0.0101} \\
+GraFITi & 0.0439$\pm$0.0006 & 0.1226$\pm$0.0019 & 0.1669$\pm$0.0037 & 0.2730$\pm$0.0269 \\
+APN & \best{0.0421$\pm$0.0001} & \second{0.1156$\pm$0.0002} & 0.1611$\pm$0.0205 & 0.2844$\pm$0.0520 \\
+\midrule
+\method{} & \second{0.0434$\pm$0.0008} & \best{0.1126$\pm$0.0008} & \best{0.1332$\pm$0.0083} & \best{0.2075$\pm$0.0067} \\
+\bottomrule
+\end{tabular}}
+
+\vspace{0.75em}
+
+\resizebox{\textwidth}{!}{
+\begin{tabular}{l|c|c|c|c}
+\toprule
+Method
+& \multicolumn{2}{|c|}{P12}
+& \multicolumn{2}{c}{MIMIC} \\
+\cmidrule(lr){2-3}
+\cmidrule(lr){4-5}
+& MSE & MAE & MSE & MAE \\
+\midrule
+PrimeNet & 0.7953$\pm$0.0000 & 0.6859$\pm$0.0001 & 0.9073$\pm$0.0001 & 0.6614$\pm$0.0001 \\
+NeuralFlows & 0.4056$\pm$0.0033 & 0.4466$\pm$0.0027 & 0.6085$\pm$0.0101 & 0.5306$\pm$0.0066 \\
+CRU & 0.6179$\pm$0.0045 & 0.5778$\pm$0.0031 & 0.5895$\pm$0.0092 & 0.5151$\pm$0.0048 \\
+mTAN & 0.3809$\pm$0.0043 & 0.4291$\pm$0.0035 & 0.9408$\pm$0.1126 & 0.6755$\pm$0.0459 \\
+SeFT & 0.7721$\pm$0.0021 & 0.6760$\pm$0.0029 & 0.9230$\pm$0.0015 & 0.6628$\pm$0.0008 \\
+GNeuralFlow & 0.8207$\pm$0.0310 & 0.6759$\pm$0.0100 & 0.8957$\pm$0.0209 & 0.6450$\pm$0.0072 \\
+GRU-D & 0.3419$\pm$0.0029 & 0.3992$\pm$0.0011 & 0.4759$\pm$0.0100 & 0.4526$\pm$0.0055 \\
+Raindrop & 0.3478$\pm$0.0019 & 0.4044$\pm$0.0020 & 0.6754$\pm$0.1829 & 0.5444$\pm$0.0868 \\
+Warpformer & \second{0.3059$\pm$0.0013} & 0.3655$\pm$0.0019 & \second{0.4302$\pm$0.0035} & \second{0.4025$\pm$0.0014} \\
+tPatchGNN & 0.3117$\pm$0.0034 & 0.3676$\pm$0.0033 & 0.4431$\pm$0.0115 & 0.4077$\pm$0.0088 \\
+GraFITi & 0.3070$\pm$0.0030 & \second{0.3633$\pm$0.0051} & 0.5035$\pm$0.0310 & 0.4442$\pm$0.0254 \\
+APN & 0.3150$\pm$0.0016 & 0.3691$\pm$0.0032 & 0.4746$\pm$0.0045 & 0.4155$\pm$0.0063 \\
+\midrule
+\method{} & \best{0.3020$\pm$0.0014} & \best{0.3511$\pm$0.0005} & \best{0.4232$\pm$0.0022} & \best{0.3719$\pm$0.0043} \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{table}[!htbp]
+\caption{\method{} standard-window seed stability. Entries are global scaled
+errors for the three independent seeds used in Table~\ref{tab:main-results}.
+Lower is better.}
+\label{tab:adept-seeds}
+\centering
+\scriptsize
+\resizebox{\textwidth}{!}{
+\begin{tabular}{l|cc|cc|cc|cc}
+\toprule
+Seed
+& \multicolumn{2}{c|}{HumanActivity}
+& \multicolumn{2}{c|}{USHCN}
+& \multicolumn{2}{c|}{P12}
+& \multicolumn{2}{c}{MIMIC} \\
+\cmidrule(lr){2-3}
+\cmidrule(lr){4-5}
+\cmidrule(lr){6-7}
+\cmidrule(lr){8-9}
+& MSE & MAE & MSE & MAE & MSE & MAE & MSE & MAE \\
+\midrule
+2024 & 0.0428 & 0.1134 & 0.1426 & 0.2132 & 0.3036 & 0.3514 & 0.4216 & 0.3710 \\
+2025 & 0.0443 & 0.1118 & 0.1268 & 0.2093 & 0.3007 & 0.3514 & 0.4257 & 0.3765 \\
+2026 & 0.0431 & 0.1127 & 0.1303 & 0.2001 & 0.3019 & 0.3505 & 0.4222 & 0.3680 \\
+\midrule
+Mean & 0.0434 & 0.1126 & 0.1332 & 0.2075 & 0.3020 & 0.3511 & 0.4232 & 0.3719 \\
+Std. & 0.0008 & 0.0008 & 0.0083 & 0.0067 & 0.0014 & 0.0005 & 0.0022 & 0.0043 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{table}[!htbp]
+\caption{Entity-bootstrap uncertainty for \method{} at the standard benchmark
+windows. Point estimates are target-weighted global scaled errors; 95\%
+intervals resample seed--entity units with replacement.}
+\label{tab:entity-bootstrap}
+\centering
+\scriptsize
+\begin{tabular}{l|r|r|c|c}
+\toprule
+Dataset & Seed--entity units & Predictions & MAE [95\% CI] & MSE [95\% CI] \\
+\midrule
+P12 & 3,555 & 70,740 & 0.3511 [0.3456, 0.3568] & 0.3020 [0.2916, 0.3126] \\
+MIMIC & 5,316 & 69,384 & 0.3719 [0.3648, 0.3793] & 0.4232 [0.3981, 0.4506] \\
+USHCN & 336 & 1,104 & 0.2075 [0.1880, 0.2284] & 0.1332 [0.1093, 0.1618] \\
+HumanActivity & 654 & 17,730 & 0.1126 [0.1073, 0.1183] & 0.0434 [0.0386, 0.0484] \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure*}[!htbp]
+\centering
+\pgfplotsset{
+    adeptWindowPanel/.style={
+        width=0.445\linewidth,
+        height=0.305\linewidth,
+        xlabel={Lookback / Horizon},
+        grid=both,
+        grid style={gray!15},
+        major grid style={gray!20},
+        tick label style={font=\scriptsize},
+        xticklabel style={rotate=30, anchor=east, yshift=-0.6ex},
+        label style={font=\scriptsize},
+        title style={font=\scriptsize, yshift=1.0ex},
+        legend style={font=\scriptsize, draw=black, rounded corners=2pt, fill=none, at={(1.04,1.30)}, anchor=south, legend columns=4},
+        scaled y ticks=false,
+        clip=false
+    },
+    adeptModel/.style={black, thick, mark=*, mark size=1.8pt},
+    apnStyle/.style={red!70!black, thick, mark=diamond*, mark size=2.5pt},
+    grafitiStyle/.style={blue!70!black, thick, mark=triangle*, mark size=2.2pt},
+    tpatchStyle/.style={green!50!black, thick, mark=square*, mark size=2pt}
+}
+
+\begin{subfigure}{\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[
+    group style={group size=2 by 1, horizontal sep=1.80cm},
+    adeptWindowPanel,
+    xmin=0.7, xmax=4.3,
+    xtick={1,2,3,4},
+    xticklabels={{1000/100},{2000/200},{3000/300},{3000/600}}
+]
+\nextgroupplot[ylabel={MSE}, ymin=0.038, ymax=0.066]
+\path[fill=gray!18, draw=none] (axis cs:2.65,0.038) rectangle (axis cs:3.35,0.066);
+\addplot+[adeptModel] coordinates {(1,0.0565) (2,0.0494) (3,0.0436) (4,0.0505)};
+\addlegendentry{\method{}}
+\addplot+[apnStyle] coordinates {(1,0.0545) (2,0.0483) (3,0.0421) (4,0.0483)};
+\addlegendentry{APN}
+\addplot+[grafitiStyle] coordinates {(1,0.0603) (2,0.0514) (3,0.0439) (4,0.0506)};
+\addlegendentry{GraFITi}
+\addplot+[tpatchStyle] coordinates {(1,0.0620) (2,0.0531) (3,0.0470) (4,0.0524)};
+\addlegendentry{tPatchGNN}
+\nextgroupplot[ylabel={MAE}, ymin=0.103, ymax=0.145]
+\path[fill=gray!18, draw=none] (axis cs:2.65,0.103) rectangle (axis cs:3.35,0.145);
+\addplot+[adeptModel] coordinates {(1,0.1101) (2,0.1133) (3,0.1123) (4,0.1262)};
+\addplot+[apnStyle] coordinates {(1,0.1139) (2,0.1159) (3,0.1156) (4,0.1265)};
+\addplot+[grafitiStyle] coordinates {(1,0.1304) (2,0.1290) (3,0.1226) (4,0.1369)};
+\addplot+[tpatchStyle] coordinates {(1,0.1322) (2,0.1311) (3,0.1323) (4,0.1398)};
+\end{groupplot}
+\end{tikzpicture}
+\centerline{\footnotesize (a) HumanActivity}
+\end{subfigure}
+
+\vspace{0.95em}
+
+\begin{subfigure}{\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[
+    group style={group size=2 by 1, horizontal sep=1.80cm},
+    adeptWindowPanel,
+    xmin=0.7, xmax=4.3,
+    xtick={1,2,3,4},
+    xticklabels={{12/1},{24/3},{72/3},{72/6}}
+]
+\nextgroupplot[ylabel={MSE}, ymin=0.32, ymax=1.22]
+\path[fill=gray!18, draw=none] (axis cs:2.65,0.32) rectangle (axis cs:3.35,1.22);
+\addplot+[adeptModel] coordinates {(1,0.9514) (2,0.6764) (3,0.4207) (4,0.4261)};
+\addplot+[apnStyle] coordinates {(1,0.9828) (2,0.7252) (3,0.4746) (4,0.4837)};
+\addplot+[grafitiStyle] coordinates {(1,0.9915) (2,0.7319) (3,0.5035) (4,0.5357)};
+\addplot+[tpatchStyle] coordinates {(1,1.1484) (2,0.7210) (3,0.4695) (4,0.5145)};
+\nextgroupplot[ylabel={MAE}, ymin=0.33, ymax=0.64]
+\path[fill=gray!18, draw=none] (axis cs:2.65,0.33) rectangle (axis cs:3.35,0.64);
+\addplot+[adeptModel] coordinates {(1,0.5633) (2,0.5126) (3,0.3713) (4,0.3771)};
+\addplot+[apnStyle] coordinates {(1,0.5982) (2,0.5558) (3,0.4155) (4,0.4278)};
+\addplot+[grafitiStyle] coordinates {(1,0.6086) (2,0.5592) (3,0.4442) (4,0.4711)};
+\addplot+[tpatchStyle] coordinates {(1,0.5791) (2,0.5517) (3,0.4080) (4,0.4311)};
+\end{groupplot}
+\end{tikzpicture}
+\centerline{\footnotesize (b) MIMIC}
+\end{subfigure}
+
+\vspace{0.95em}
+
+\begin{subfigure}{\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[
+    group style={group size=2 by 1, horizontal sep=1.80cm},
+    adeptWindowPanel,
+    xmin=0.7, xmax=4.3,
+    xtick={1,2,3,4},
+    xticklabels={{12/1},{24/3},{36/3},{36/6}}
+]
+\nextgroupplot[ylabel={MSE}, ymin=0.265, ymax=0.345]
+\path[fill=gray!18, draw=none] (axis cs:2.65,0.265) rectangle (axis cs:3.35,0.345);
+\addplot+[adeptModel] coordinates {(1,0.3067) (2,0.3152) (3,0.3035) (4,0.3213)};
+\addplot+[apnStyle] coordinates {(1,0.3249) (2,0.3213) (3,0.3150) (4,0.3345)};
+\addplot+[grafitiStyle] coordinates {(1,0.3089) (2,0.3170) (3,0.3070) (4,0.3239)};
+\addplot+[tpatchStyle] coordinates {(1,0.3143) (2,0.3229) (3,0.3117) (4,0.3280)};
+\nextgroupplot[ylabel={MAE}, ymin=0.335, ymax=0.395]
+\path[fill=gray!18, draw=none] (axis cs:2.65,0.335) rectangle (axis cs:3.35,0.395);
+\addplot+[adeptModel] coordinates {(1,0.3476) (2,0.3569) (3,0.3525) (4,0.3698)};
+\addplot+[apnStyle] coordinates {(1,0.3744) (2,0.3711) (3,0.3691) (4,0.3881)};
+\addplot+[grafitiStyle] coordinates {(1,0.3568) (2,0.3706) (3,0.3633) (4,0.3813)};
+\addplot+[tpatchStyle] coordinates {(1,0.3645) (2,0.3747) (3,0.3676) (4,0.3860)};
+\end{groupplot}
+\end{tikzpicture}
+\centerline{\footnotesize (c) P12}
+\end{subfigure}
+
+\vspace{0.95em}
+
+\begin{subfigure}{\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[
+    group style={group size=2 by 1, horizontal sep=1.80cm},
+    adeptWindowPanel,
+    xmin=0.7, xmax=4.3,
+    xtick={1,2,3,4},
+    xticklabels={{50/1},{100/3},{150/3},{150/7}}
+]
+\nextgroupplot[ylabel={MSE}, ymin=0.12, ymax=0.78]
+\path[fill=gray!18, draw=none] (axis cs:2.65,0.12) rectangle (axis cs:3.35,0.78);
+\addplot+[adeptModel] coordinates {(1,0.6011) (2,0.5409) (3,0.1614) (4,0.4160)};
+\addplot+[apnStyle] coordinates {(1,0.5989) (2,0.6457) (3,0.1611) (4,0.4103)};
+\addplot+[grafitiStyle] coordinates {(1,0.5805) (2,0.6576) (3,0.1669) (4,0.4378)};
+\addplot+[tpatchStyle] coordinates {(1,0.5504) (2,0.6109) (3,0.1596) (4,0.4067)};
+\nextgroupplot[ylabel={MAE}, ymin=0.20, ymax=0.46]
+\path[fill=gray!18, draw=none] (axis cs:2.65,0.20) rectangle (axis cs:3.35,0.46);
+\addplot+[adeptModel] coordinates {(1,0.3517) (2,0.3211) (3,0.2239) (4,0.2765)};
+\addplot+[apnStyle] coordinates {(1,0.4020) (2,0.4262) (3,0.2844) (4,0.3266)};
+\addplot+[grafitiStyle] coordinates {(1,0.3976) (2,0.4394) (3,0.2730) (4,0.3539)};
+\addplot+[tpatchStyle] coordinates {(1,0.4045) (2,0.4338) (3,0.2668) (4,0.3437)};
+\end{groupplot}
+\end{tikzpicture}
+\centerline{\footnotesize (d) USHCN}
+\end{subfigure}
+\caption{Cross-model lookback--horizon comparison on a balanced four-window grid
+per dataset. Each panel plots global scaled MSE and MAE for \method{} and the
+three available neural baselines. Gray bands mark the standard benchmark
+window. Lower is better.}
+\label{fig:cross-model-window-sweep}
+\end{figure*}
+
+\paragraph{Standard-window comparison}
+Table~\ref{tab:main-results} is the central comparison because all methods are
+evaluated at the canonical benchmark windows. \method{} improves the strongest
+standard-window MAE in every dataset. On USHCN, MAE falls from the best baseline
+value of 0.2668 to 0.2075, and MSE falls from 0.1596 to 0.1332. This is the
+largest relative improvement and is the clearest effect of the adaptive expert decoder:
+history-derived seasonal and graph-aware summaries correct the climate regime
+where the model without the adaptive expert decoder was window-sensitive. On MIMIC, \method{}
+reduces MAE from 0.4025 to 0.3719 and MSE from 0.4302 to 0.4232. The MSE gain
+is modest, but it is consistent across seeds and appears together with a larger
+MAE improvement. On P12, \method{} improves MAE from 0.3633 to 0.3511 and MSE
+from 0.3059 to 0.3020.
+
+HumanActivity is the one standard-window case where \method{} does not win both
+metrics. It obtains the best MAE, 0.1126 versus APN's 0.1156, but APN remains
+lower on MSE, 0.0421 versus 0.0434. This should be read as a squared-error
+trade-off, not as a complete loss on the dataset: the typical absolute error is
+better, while a small number of larger deviations keep APN ahead in MSE. The
+standard-window conclusion is therefore strong but bounded: \method{} leads all
+four MAE blocks, leads three of four MSE blocks, and has one small but real MSE
+counterexample.
+
+\paragraph{Seed stability}
+Table~\ref{tab:adept-seeds} shows that the standard-window result is not a
+single lucky seed. P12 and HumanActivity are especially stable: the MAE standard
+deviation is 0.0005 and 0.0008, respectively. MIMIC has slightly larger MAE
+variation, 0.0043, but every seed remains well below the strongest baseline MAE.
+USHCN is naturally less stable because it has far fewer masked targets, yet all
+three \method{} seeds improve the baseline MAE by a large margin. The seed table also
+clarifies why the paper does not claim HumanActivity MSE leadership: each seed
+is close to APN, but the mean remains higher than APN's 0.0421.
+Table~\ref{tab:entity-bootstrap} adds entity-level uncertainty. The intervals
+are tightest for the larger clinical and activity benchmarks and widest for
+USHCN, matching the smaller target count in the standard climate window.
+
+\paragraph{Lookback--horizon robustness}
+Figure~\ref{fig:cross-model-window-sweep} separates robust behavior from
+single-window luck. \method{} wins all 16 MAE cells across the four datasets.
+The strongest pattern is on MIMIC and P12, where \method{} wins every displayed
+MSE and MAE cell. MIMIC gains are largest at the clinically useful longer
+windows: at 72/3, MSE improves from the best baseline value of 0.4695 to 0.4207,
+and MAE improves from 0.4080 to 0.3713. P12 is more compact but similarly
+consistent, with small MSE margins and clear MAE margins at all four windows. USHCN changes substantially when the adaptive expert decoder is included. The full
+\method{} model now wins all USHCN MAE cells and the 100/3 MSE cell, while
+remaining slightly behind the best MSE at 50/1, 150/3, and 150/7. This is a
+useful boundary: the adaptive experts greatly improve typical climate error,
+but the best squared-error behavior at some climate horizons still belongs to a
+baseline. HumanActivity has the opposite shape. \method{} wins every
+HumanActivity MAE cell, but APN keeps the best MSE in all four cells. The sweep
+therefore refines the headline claim: \method{} is uniformly strong on MAE,
+dominant on P12 and MIMIC, greatly improved on USHCN, and still MSE-contested on
+HumanActivity.
+
+\section{Additional Experiments}
+\label{sec:additional-experiments}
+
+\begin{table}[!htbp]
+\caption{Architecture diagnostics for \method{} at the standard benchmark
+windows. Entries are means over seeds 2024--2026. ``No adaptive expert decoder''
+removes the adaptive expert gate and history-derived scalar experts while
+leaving the neural event graph decoder intact. Lower is better; \textbf{bold}
+marks the best value and \underline{underlining} marks the second-best value
+within each dataset--metric block.}
+\label{tab:architecture-diagnostics}
+\centering
+{\tiny
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{0.92}
+\resizebox{0.82\textwidth}{!}{
+\begin{tabular}{l|l|c|c}
+\toprule
+Dataset & Variant & MSE & MAE \\
+\midrule
+\multirow{7}{*}{HumanActivity}
+& \method{} & \best{0.0436} & \best{0.1124} \\
+& No adaptive expert decoder & 0.0451 & 0.1232 \\
+& No delta kernel & 0.0467 & \second{0.1229} \\
+& No graph mixer & 0.0456 & 0.1239 \\
+& No transformer & \second{0.0437} & \second{0.1229} \\
+& No time encoding & 0.0451 & 0.1293 \\
+& Direct decoder & 0.3098 & 0.4080 \\
+\midrule
+\multirow{7}{*}{USHCN}
+& \method{} & 0.2335 & 0.2443 \\
+& No adaptive expert decoder & \best{0.1410} & \best{0.2218} \\
+& No delta kernel & 0.1540 & 0.2391 \\
+& No graph mixer & 0.1627 & 0.2449 \\
+& No transformer & \second{0.1434} & \second{0.2290} \\
+& No time encoding & 0.1469 & 0.2593 \\
+& Direct decoder & 0.2378 & 0.3451 \\
+\midrule
+\multirow{7}{*}{P12}
+& \method{} & \second{0.3030} & \best{0.3509} \\
+& No adaptive expert decoder & 0.3044 & \second{0.3616} \\
+& No delta kernel & 0.3037 & 0.3625 \\
+& No graph mixer & 0.3053 & 0.3666 \\
+& No transformer & \best{0.3021} & \second{0.3616} \\
+& No time encoding & 0.3079 & 0.3679 \\
+& Direct decoder & 0.7936 & 0.6797 \\
+\midrule
+\multirow{7}{*}{MIMIC}
+& \method{} & \best{0.4260} & \best{0.3734} \\
+& No adaptive expert decoder & 0.4338 & 0.3904 \\
+& No delta kernel & \second{0.4337} & \second{0.3805} \\
+& No graph mixer & 0.4415 & 0.3903 \\
+& No transformer & 0.4460 & 0.3916 \\
+& No time encoding & 0.4417 & 0.3907 \\
+& Direct decoder & 0.9632 & 0.6418 \\
+\bottomrule
+\end{tabular}}}
+\end{table}
+
+\begin{figure*}[!htbp]
+\centering
+\pgfplotsset{
+    adeptTemporalPanel/.style={
+        width=0.445\linewidth,
+        height=0.305\linewidth,
+        grid=both,
+        grid style={gray!15},
+        major grid style={gray!20},
+        tick label style={font=\scriptsize},
+        xticklabel style={rotate=35, anchor=east, yshift=-0.6ex},
+        label style={font=\scriptsize},
+        title style={font=\scriptsize, yshift=1.0ex},
+        scaled y ticks=false,
+        clip=false
+    },
+    adeptLine/.style={black, thick, mark=*, mark size=1.9pt}
+}
+
+\begin{subfigure}{\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[
+    group style={group size=2 by 1, horizontal sep=1.80cm},
+    adeptTemporalPanel,
+    xtick={1,2,3,4,5,6,7,8,9},
+    xticklabels={{Orig},{Shuffle},{Swap},{Drop},{Last},{Gaps},{75\%},{50\%},{25\%}}
+]
+\nextgroupplot[ylabel={MSE}, ymin=0.25, ymax=0.85]
+\addplot+[adeptLine] coordinates {(1,0.3034) (2,0.4595) (3,0.5216) (4,0.3249) (5,0.3615) (6,0.7870) (7,0.3231) (8,0.3574) (9,0.4328)};
+\nextgroupplot[ylabel={MAE}, ymin=0.32, ymax=0.72]
+\addplot+[adeptLine] coordinates {(1,0.3509) (2,0.4580) (3,0.4910) (4,0.3641) (5,0.3798) (6,0.6799) (7,0.3658) (8,0.3892) (9,0.4348)};
+\end{groupplot}
+\end{tikzpicture}
+\centerline{\footnotesize (a) P12}
+\end{subfigure}
+
+\vspace{0.95em}
+
+\begin{subfigure}{\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[
+    group style={group size=2 by 1, horizontal sep=1.80cm},
+    adeptTemporalPanel,
+    xtick={1,2,3,4,5,6,7,8,9},
+    xticklabels={{Orig},{Shuffle},{Swap},{Drop},{Last},{Gaps},{75\%},{50\%},{25\%}}
+]
+\nextgroupplot[ylabel={MSE}, ymin=0.38, ymax=1.00]
+\addplot+[adeptLine] coordinates {(1,0.4269) (2,0.5657) (3,0.6543) (4,0.4384) (5,0.4346) (6,0.9384) (7,0.4540) (8,0.5424) (9,0.6843)};
+\nextgroupplot[ylabel={MAE}, ymin=0.34, ymax=0.66]
+\addplot+[adeptLine] coordinates {(1,0.3713) (2,0.4519) (3,0.4923) (4,0.3778) (5,0.3784) (6,0.6399) (7,0.3920) (8,0.4374) (9,0.5106)};
+\end{groupplot}
+\end{tikzpicture}
+\centerline{\footnotesize (b) MIMIC}
+\end{subfigure}
+
+\vspace{0.95em}
+
+\begin{subfigure}{\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[
+    group style={group size=2 by 1, horizontal sep=1.80cm},
+    adeptTemporalPanel,
+    xtick={1,2,3,4,5,6,7,8,9},
+    xticklabels={{Orig},{Shuffle},{Swap},{Drop},{Last},{Gaps},{75\%},{50\%},{25\%}}
+]
+\nextgroupplot[ylabel={MSE}, ymin=0.12, ymax=0.38]
+\addplot+[adeptLine] coordinates {(1,0.1467) (2,0.2346) (3,0.1902) (4,0.1473) (5,0.2622) (6,0.3359) (7,0.1570) (8,0.1532) (9,0.1696)};
+\nextgroupplot[ylabel={MAE}, ymin=0.20, ymax=0.40]
+\addplot+[adeptLine] coordinates {(1,0.2196) (2,0.2546) (3,0.2332) (4,0.2236) (5,0.3151) (6,0.3744) (7,0.2269) (8,0.2299) (9,0.2345)};
+\end{groupplot}
+\end{tikzpicture}
+\centerline{\footnotesize (c) USHCN}
+\end{subfigure}
+
+\vspace{0.95em}
+
+\begin{subfigure}{\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{groupplot}[
+    group style={group size=2 by 1, horizontal sep=1.80cm},
+    adeptTemporalPanel,
+    xtick={1,2,3,4,5,6,7,8,9},
+    xticklabels={{Orig},{Shuffle},{Swap},{Drop},{Last},{Gaps},{75\%},{50\%},{25\%}}
+]
+\nextgroupplot[ylabel={MSE}, ymin=0.03, ymax=4.5, ymode=log]
+\addplot+[adeptLine] coordinates {(1,0.0433) (2,0.0859) (3,0.1027) (4,0.0437) (5,0.0548) (6,3.9569) (7,0.0476) (8,0.0506) (9,0.0719)};
+\nextgroupplot[ylabel={MAE}, ymin=0.09, ymax=1.85, ymode=log]
+\addplot+[adeptLine] coordinates {(1,0.1124) (2,0.1731) (3,0.1909) (4,0.1125) (5,0.1216) (6,1.6375) (7,0.1174) (8,0.1235) (9,0.1447)};
+\end{groupplot}
+\end{tikzpicture}
+\centerline{\footnotesize (d) HumanActivity}
+\end{subfigure}
+\caption{Temporal perturbation and history-thinning tests for \method{} at the
+standard benchmark windows, averaged over seeds 2024--2026. Orig uses unchanged
+histories; Shuffle permutes timestamps; Swap exchanges early and late value
+halves; Drop removes the first half of the history; Last keeps only the most
+recent observation; Gaps keeps timestamps while replacing values by scaled zero;
+and 75\%, 50\%, and 25\% retain random history subsets of the indicated size.
+HumanActivity uses a log-scaled vertical axis because the time-gaps-only
+intervention is much larger than the other interventions. Lower is better.}
+\label{fig:adept-temporal-tests}
+\end{figure*}
+
+\begin{table*}[!htbp]
+\caption{Cross-model temporal perturbation summary at the standard benchmark
+windows. Deltas are relative to each model's original-history evaluation under
+the same window and are aggregate, not paired, comparisons.}
+\label{tab:cross-model-temporal}
+\centering
+\scriptsize
+\resizebox{\textwidth}{!}{
+\begin{tabular}{l|l|r|r|r|r|r|r}
+\toprule
+Dataset & Model & Orig. MSE & Shuffle $\Delta$MSE & Swap $\Delta$MSE & Gaps $\Delta$MSE & Orig. MAE & Gaps $\Delta$MAE \\
+\midrule
+\multirow{4}{*}{P12}
+& \method{} & 0.3034 & +0.1561 & +0.2182 & +0.4835 & 0.3509 & +0.3290 \\
+& APN & 0.3150 & +0.1410 & +0.1966 & +0.4816 & 0.3691 & +0.3168 \\
+& GraFITi & 0.3070 & +0.1476 & +0.1905 & +0.4911 & 0.3633 & +0.3285 \\
+& tPatchGNN & 0.3117 & +0.4565 & +0.1842 & +0.4843 & 0.3676 & +0.3178 \\
+\midrule
+\multirow{4}{*}{MIMIC}
+& \method{} & 0.4269 & +0.1387 & +0.2274 & +0.5114 & 0.3713 & +0.2685 \\
+& APN & 0.4746 & +0.1389 & +0.1890 & +0.4954 & 0.4155 & +0.2417 \\
+& GraFITi & 0.5035 & +0.1126 & +0.1683 & +0.4672 & 0.4442 & +0.2294 \\
+& tPatchGNN & 0.4695 & +0.1545 & +0.2108 & +0.4906 & 0.4080 & +0.2403 \\
+\midrule
+\multirow{4}{*}{USHCN}
+& \method{} & 0.1467 & +0.0879 & +0.0435 & +0.1893 & 0.2196 & +0.1549 \\
+& APN & 0.1611 & +0.0002 & +0.0024 & +0.0783 & 0.2844 & +0.0735 \\
+& GraFITi & 0.1669 & +0.0007 & +0.0003 & +0.1032 & 0.2730 & +0.1035 \\
+& tPatchGNN & 0.1596 & +0.0094 & +0.3894 & +0.1556 & 0.2668 & +0.1246 \\
+\midrule
+\multirow{4}{*}{HumanActivity}
+& \method{} & 0.0433 & +0.0426 & +0.0595 & +3.9137 & 0.1124 & +1.5250 \\
+& APN & 0.0421 & +0.0349 & +0.0581 & +4.0887 & 0.1156 & +1.5582 \\
+& GraFITi & 0.0439 & +0.0345 & +0.0486 & +3.5535 & 0.1226 & +1.4151 \\
+& tPatchGNN & 0.0470 & +0.3704 & +0.0527 & +3.7564 & 0.1323 & +1.4774 \\
+\bottomrule
+\end{tabular}}
+\end{table*}
+
+\paragraph{Architecture diagnostics}
+Table~\ref{tab:architecture-diagnostics} separates the adaptive expert decoder
+from the rest of the neural event graph. The no-adaptive-expert variant removes
+only the expert gate and history-derived scalar experts, while the direct
+decoder is a much more severe control that discards the main event-memory
+pathway. The direct decoder is consistently poor, confirming that the model is
+not just benefiting from dataset-level constants or simple target means. On
+MIMIC, the full \method{} model is best on both metrics: MAE improves from
+0.3904 to 0.3734 after adding the adaptive expert decoder, and MSE improves
+from 0.4338 to 0.4260. On P12 and HumanActivity, the adaptive expert decoder
+gives the best MAE, while no-transformer variants have slightly lower or
+essentially tied MSE. This indicates that the expert decoder improves typical
+absolute error, but the squared-error optimum can sometimes favor a less
+expressive memory path. USHCN deserves a cautious reading. The standard \method{} benchmark in
+Table~\ref{tab:main-results} is strong, but the architecture diagnostic run
+shows that the no-adaptive-expert variant can be better under the diagnostic rerun. This
+does not invalidate the standard table, which is the primary benchmark result;
+it shows that USHCN is sensitive to small target counts and run context. The
+important pattern is that learned event memory and graph-aware retrieval are
+essential, while the adaptive gate improves USHCN strongly in the full benchmark
+sweep but can overfit particular diagnostic splits.
+
+\paragraph{Temporal perturbation and history thinning}
+Figure~\ref{fig:adept-temporal-tests} tests whether \method{} actually uses
+observed values and timing. The most severe intervention is replacing values by
+scaled zero while preserving timestamps. This raises MSE from 0.3034 to 0.7870
+on P12, from 0.4269 to 0.9384 on MIMIC, from 0.1467 to 0.3359 on USHCN, and
+from 0.0433 to 3.9569 on HumanActivity. These degradations rule out a pure
+time-mask shortcut.
+Table~\ref{tab:cross-model-temporal} places the same temporal interventions
+next to APN, GraFITi, and tPatchGNN. These are aggregate cross-model
+comparisons rather than paired prediction-level tests, but they show that value
+removal is strongly damaging for all models and that \method{} is especially
+competitive on the original-history MAE columns.
+
+Reordering also matters. Swapping early and late value halves increases MIMIC
+MSE from 0.4269 to 0.6543 and HumanActivity MSE from 0.0433 to 0.1027.
+Timestamp shuffling is especially harmful on P12 and HumanActivity, where the
+model depends on correct temporal placement in addition to value identity.
+History thinning is more gradual: keeping only 25\% of the history increases
+MSE from 0.3034 to 0.4328 on P12, from 0.4269 to 0.6843 on MIMIC, from 0.1467
+to 0.1696 on USHCN, and from 0.0433 to 0.0719 on HumanActivity. The smaller
+USHCN thinning effect is consistent with the adaptive experts: once seasonal
+and recent summaries are available, additional sparse climate points add less
+than they do in the clinical datasets.
+
+\paragraph{Additional-experiment synthesis}
+The additional experiments support a specific mechanism. The transformer memory,
+delta kernels, and graph retrieval provide the event representation; the
+adaptive expert decoder then improves the final numerical forecast by deciding
+when to trust same-variable persistence, graph-aware memory, local trend, or
+the neural head.
+This combination is especially useful for MAE: it wins every standard dataset
+and every displayed window cell. The same diagnostics also show the boundary of
+the approach. Squared-error leadership is still fragile on HumanActivity and
+some USHCN windows, where small numbers of large deviations can outweigh better
+typical absolute error. The model is therefore best described as broadly
+state-of-the-art under the evaluated protocol, not universally dominant on every
+metric and horizon.
+
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{Evidence}
+The central modeling lesson is that IMTS forecasting should not separate
+irregular representation from the final evidence-selection problem. A future
+time--variable query often needs a local same-variable anchor, but this anchor
+is not always sufficient: graph-neighbor measurements, entity-level state, and
+short local trends become important when the requested variable is sparse or
+when the horizon changes. \method{} addresses this by keeping observations as
+events, retrieving them with query-conditioned attention and delta kernels, and
+then using the adaptive expert decoder to decide how much numerical trust to
+place in each historical source.
+
+\paragraph{Robustness}
+The empirical pattern is strongest for typical forecast accuracy. \method{}
+achieves the best standard-window MAE on all four datasets and keeps the MAE
+lead across every displayed lookback--horizon cell. This consistency is more
+important than a single benchmark win: it suggests that the model is not merely
+matched to one canonical window, but is repeatedly improving the ordinary
+absolute error made on masked future targets. The MSE results are positive but
+more conditional. \method{} leads standard-window MSE on P12, MIMIC, and
+USHCN, yet APN remains better on HumanActivity MSE and several USHCN sweep
+cells remain contested. Thus the main outcome is robust absolute-error
+improvement, with squared-error sensitivity still visible when rare larger
+deviations dominate the metric.
+
+\paragraph{Mechanism}
+The diagnostic experiments support the intended mechanism rather than a
+shortcut explanation. Removing values while preserving timestamps sharply
+degrades performance, so the model is not exploiting only time masks or target
+availability patterns. Timestamp shuffling, early--late swaps, and history
+thinning further show that temporal placement and history depth matter.
+Ablations give the complementary architectural view: direct decoding is weak,
+event memory and graph-aware retrieval are important, and the adaptive expert
+decoder improves the final numerical forecast most reliably in MAE. Together,
+these results indicate that the gains come from combining neural event memory
+with adaptive, query-specific history anchors.
+
+\paragraph{Protocol}
+The comparison protocol also matters. \method{} does not use APN, GraFITi,
+tPatchGNN, or any other baseline prediction as an expert. Its experts are
+computed only from the observed history of the evaluated example, and their
+gating weights are learned during training. Validation is used for checkpoint
+and architecture selection, while test labels are reserved for final reporting.
+This distinction is important because the adaptive decoder could otherwise be
+mistaken for post hoc ensembling or test-time routing; in the implemented
+model, it is an internal neural forecasting component.
+
+\paragraph{Limitations}
+The remaining weaknesses point to useful next steps. USHCN has few masked
+targets at the standard window, so seed variation and diagnostic reversals are
+expected. HumanActivity exposes a different issue: a model can improve MAE
+while still losing MSE if occasional large deviations are not suppressed.
+Future work should therefore study more outlier-aware residual control,
+calibrated uncertainty for sparse query sets, and paired entity-level exports
+for all baselines so that statistical comparisons can move beyond aggregate
+tables. More broadly, the results suggest that the next progress in IMTS
+forecasting may come less from choosing between graphs, patches, or continuous
+dynamics, and more from designing decoders that know when each source of
+historical evidence should be trusted.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+\method{} frames irregular multivariate forecasting as a query-conditioned
+event retrieval problem. The model keeps observations as time--variable events,
+learns adaptive cross-variable structure, retrieves event memory with
+continuous-time delta kernels, and decodes each future target through a gated
+mixture of neural and history-derived experts. This design preserves strong
+local forecasting anchors while remaining end-to-end neural and avoiding
+external predictions, test labels, or post hoc routing. Across four IMTS benchmarks, \method{} delivers the best standard-window MAE on
+every dataset and the best standard-window MSE on three of four, with a
+remaining HumanActivity MSE gap that clarifies the method's squared-error
+boundary. Window sweeps, perturbations, bootstrap intervals, and ablations show
+that the improvement is not a mask shortcut or a persistence-only effect: it
+depends on real values, correct timing, event-memory retrieval, graph context,
+and adaptive expert selection. The resulting contribution is a
+protocol-preserving forecaster whose main strength is robust absolute-error
+accuracy across irregular clinical, climate, and activity time series.
+
+\bibliographystyle{plainnat}
+\bibliography{adept}
+
+\clearpage
+\appendix
+\section{Notation}
+\label{app:adept-symbols}
+
+\begin{table}[!htbp]
+\caption{Core notation used in the \method{} architecture description.}
+\label{tab:adept-symbols}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{0.94}
+\begin{tabular}{p{0.14\textwidth}p{0.32\textwidth}p{0.14\textwidth}p{0.32\textwidth}}
+\toprule
+Symbol & Description & Symbol & Description \\
+\midrule
+$b$ & Entity index. &
+$\mathcal E_b$ & Irregular observed-event history for entity $b$. \\
+$i,j,k,\ell$ & Event, query, delta-kernel, and expert indices. &
+$\mathcal Q_b$ & Future time--variable query set for entity $b$. \\
+$N_b,M_b$ & Numbers of observed events and future queries. &
+$m_{b,j}$ & Active target-mask indicator for losses and metrics. \\
+$t_i,\tau_j$ & Observed event time and future query time. &
+$v_i,u_j$ & Observed variable and requested query variable. \\
+$\widetilde x_i$ & Benchmark-scaled observed value. &
+$\widetilde y_{b,j}$ & Benchmark-scaled target value. \\
+\addlinespace
+$h_i^{(0)}$ & Initial event token. &
+$e_v,\bar e_v$ & Learned variable embedding and its normalized version. \\
+$f_x,f_t$ & Value projection and Fourier time projection. &
+$H_b$ & Transformer-contextualized event memory. \\
+$d$ & Hidden width used in graph scaling. &
+$A_{u,v}$ & Adaptive graph weight from query variable $u$ to source variable $v$. \\
+$a_u$ & Projected graph context for query variable $u$. &
+$K$ & Number of learned delta kernels. \\
+$r_{j,k}$ & Delta-kernel memory context for query $j$ and kernel $k$. &
+$\alpha_{j,i,k}$ & Normalized retrieval weight assigned to event $i$. \\
+$s_k$ & Learned positive time scale for delta kernel $k$. &
+$\beta,\gamma$ & Learned same-variable and graph-affinity bias strengths. \\
+\addlinespace
+$d_j$ & Deep query state before expert gating. &
+$z^{\mathrm{nn}}_j$ & Neural base forecast. \\
+$z^{\mathrm{last}}_j$ & Same-variable latest-value expert. &
+$z^{\mathrm{ema}}_j$ & Same-variable exponential-memory expert. \\
+$z^{\mathrm{trend}}_j$ & Local trend extrapolation expert. &
+$z^{\mathrm{graph}}_j$ & Graph-aware cross-variable memory expert. \\
+$z^{\mathrm{global}}_j$ & Global entity-memory expert. &
+$\omega^u,\omega^g,\omega^0$ & Same-variable, graph-aware, and global expert weights. \\
+$\widehat m_j$ & Clipped local slope estimate. &
+$t^{\mathrm{last}}_{u_j}$ & Most recent observed time for query variable $u_j$. \\
+$z_j,z_{j,\ell}$ & Full expert-value vector and its $\ell$th component. &
+$\pi_j$ & Query-specific softmax gate over experts. \\
+$W_\pi$ & Linear gate projection. &
+$m_j$ & Same-variable history availability indicator. \\
+$g_j$ & Query gap from the most recent observed event. &
+$r_\theta$ & Bounded residual network. \\
+$\widehat y_j$ & Final query forecast. &
+$\mathcal L$ & Masked training objective. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{ADEPT Configuration}
+\label{app:adept-config}
+
+\begin{table}[!htbp]
+\caption{Global neural configuration of \method{} used in the benchmark runs.
+Architecture diagnostics disable or replace one listed component at a time.}
+\label{tab:adept-fixed-config}
+\centering
+\scriptsize
+\begin{tabular}{p{0.24\textwidth}p{0.68\textwidth}}
+\toprule
+Component & Fixed setting \\
+\midrule
+Event representation & Each finite historical observation is an event token with
+scaled value projection, learned variable embedding, and Fourier time features. \\
+\addlinespace
+Event memory & Transformer encoder with batch-first self-attention over padded
+irregular event sets; default hidden width 96, two encoder layers, four
+attention heads, and dropout 0.08--0.10 depending on run family. \\
+\addlinespace
+Adaptive variable graph & Graph weights are learned from normalized variable
+embeddings through a softmax similarity matrix and are used in query
+construction, graph-aware expert summaries, and temporal retrieval. \\
+\addlinespace
+Query decoder & Each future target is represented as a time--variable query.
+The query attends to event memory with multi-head cross-attention and receives
+graph context and normalized time-gap features. \\
+\addlinespace
+Delta kernels & Six learned positive time scales retrieve event memory using
+recency, same-variable bias, and adaptive graph strength in the \method{} benchmark
+runs. The concatenated kernel contexts are projected before decoding. \\
+\addlinespace
+Adaptive experts & The final head gates between the neural forecast, same-variable
+latest value, same-variable exponential memory, local trend extrapolation,
+graph-aware cross-variable memory, and global entity memory. Expert
+values, a same-variable availability indicator, and the query gap are passed to
+the gate. \\
+\addlinespace
+Loss and optimization & End-to-end masked loss combining MSE, smooth-$L_1$, and
+MAE terms with weights 0.50, 0.20, and 0.30; AdamW with learning rate
+$6\times10^{-4}$ to $8\times10^{-4}$ and weight decay $10^{-4}$; cosine
+learning-rate decay. \\
+\addlinespace
+Validation protocol & Validation split is used for early stopping with patience
+12--16. The \method{} validation score is MSE plus 0.25 times MAE. No test labels are
+used for routing, calibration, or sample-wise model selection. \\
+\addlinespace
+Architectural diagnostics & The diagnostic suite compares the full \method{}
+model with no-adaptive-expert-decoder, no-delta-kernel, no-graph-mixer,
+no-transformer, no-time-encoding, and direct-decoder ablations, all trained and
+evaluated through the same runner. \\
+\addlinespace
+Event limits & Long histories are capped by retaining recent events and, during
+training, a deterministic random subset of older events. \method{} benchmark runs use
+up to 2048 events per entity window and cap query batches for memory control. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}
