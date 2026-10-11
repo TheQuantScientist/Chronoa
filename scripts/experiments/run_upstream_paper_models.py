@@ -24,8 +24,8 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from chronoa.benchmark import BENCHMARK_ROOT  # noqa: E402
-from chronoa.cli_utils import expand_selection, split_csv_values, unique_preserve_order  # noqa: E402
+from adept.benchmark import BENCHMARK_ROOT  # noqa: E402
+from adept.cli_utils import expand_selection, split_csv_values, unique_preserve_order  # noqa: E402
 
 UPSTREAM_PATCH_MODEL = "A" + "PN"
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Chronoa-EDGE forecasting on upstream irregular time-series benchmark splits."""
+"""Run ADEPT forecasting on upstream irregular time-series benchmark splits."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from chronoa.cli_utils import slugify, split_csv_values, unique_preserve_order
-from chronoa.experiments.chronoa_forecasting import (
+from adept.cli_utils import slugify, split_csv_values, unique_preserve_order
+from adept.experiments.chronoa_forecasting import (
     ARCHITECTURE_ABLATIONS,
     HISTORY_PERTURBATIONS,
     LOSS_MODES,
@@ -32,7 +32,7 @@ DATASET_ORDER = ["P12", "MIMIC", "USHCN", "HumanActivity"]
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the Chronoa-EDGE neural event graph forecaster.")
+    parser = argparse.ArgumentParser(description="Run the ADEPT neural event graph forecaster.")
     parser.add_argument(
         "--dataset",
         action="append",
@@ -40,17 +40,17 @@ def parse_args() -> argparse.Namespace:
         help="Dataset to run: P12, MIMIC, USHCN, HumanActivity, or all. May be repeated or comma-separated.",
     )
     parser.add_argument("--all", action="store_true", help="Run all supported datasets.")
-    parser.add_argument("--output-root", type=Path, default=Path("chronoa_results"), help="Directory for result CSVs and logs.")
+    parser.add_argument("--output-root", type=Path, default=Path("adept_results"), help="Directory for result CSVs and logs.")
     parser.add_argument("--seq-len", type=int, default=None, help="Override benchmark lookback length.")
     parser.add_argument("--pred-len", type=int, default=None, help="Override benchmark prediction length.")
     parser.add_argument("--architecture-ablation", choices=ARCHITECTURE_ABLATIONS, default="full")
-    parser.add_argument("--loss-mode", choices=LOSS_MODES, default="default", help="default uses the released Chronoa mixed objective; mse uses MSE-only training.")
+    parser.add_argument("--loss-mode", choices=LOSS_MODES, default="default", help="default uses the released ADEPT mixed objective; mse uses MSE-only training.")
     parser.add_argument("--history-perturbation", choices=HISTORY_PERTURBATIONS, default="original")
     parser.add_argument("--history-keep-fraction", type=float, default=1.0)
     parser.add_argument("--random-seed", type=int, default=1729)
     parser.add_argument("--run-tag", default="", help="Optional suffix added to output artifact names.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite this run's CSV/log artifacts.")
-    parser.add_argument("--save-gate-log", action="store_true", help="Save APEX gate weights and scalar expert values for each evaluated query.")
+    parser.add_argument("--save-gate-log", action="store_true", help="Save ADEPT gate weights and scalar expert values for each evaluated query.")
     parser.add_argument("--max-gate-log-rows", type=int, default=None, help="Optional cap on per-query gate log rows.")
     parser.add_argument("--max-test-samples", type=int, default=None, help="Smoke-test limit on test samples per dataset.")
     parser.add_argument("--max-train-samples", type=int, default=None, help="Optional cap on training samples.")
@@ -149,7 +149,7 @@ def main() -> None:
     args.output_root.mkdir(parents=True, exist_ok=True)
     summary_path = args.output_root / "chronoa_summary.csv"
     pd.DataFrame(summaries).to_csv(summary_path, index=False)
-    print(f"Chronoa summary written to {summary_path}")
+    print(f"ADEPT summary written to {summary_path}")
 
 
 if __name__ == "__main__":

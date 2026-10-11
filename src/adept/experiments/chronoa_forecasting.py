@@ -1,6 +1,6 @@
-"""Chronoa neural forecasting on irregular time-series benchmark splits.
+"""ADEPT neural forecasting on irregular time-series benchmark splits.
 
-This module intentionally implements Chronoa as an end-to-end neural event/query
+This module intentionally implements ADEPT as an end-to-end neural event/query
 forecaster. The model consumes asynchronous observation events, builds latent
 memory with a transformer encoder, mixes variables through an adaptive graph,
 and decodes requested future (time, variable) queries with cross-attention plus
@@ -24,7 +24,7 @@ from typing import Callable, Iterable
 import numpy as np
 import pandas as pd
 
-from chronoa.benchmark import BENCHMARK_ROOT, add_benchmark_to_path
+from adept.benchmark import BENCHMARK_ROOT, add_benchmark_to_path
 
 add_benchmark_to_path()
 
@@ -54,8 +54,8 @@ APN_BASELINES = {
     "USHCN": {"MAE": 0.2611, "MSE": 0.1590},
 }
 
-MODEL_NAME = "Chronoa-EDGE"
-RUN_NAME_PREFIX = "chronoa"
+MODEL_NAME = "ADEPT"
+RUN_NAME_PREFIX = "adept"
 HISTORY_PERTURBATIONS = (
     "original",
     "shuffle_timestamps",
@@ -172,7 +172,7 @@ def canonical_loss_mode(name: str) -> str:
 
 @dataclass(frozen=True)
 class ChronoaConfig:
-    """Configuration for one Chronoa-EDGE neural benchmark run."""
+    """Configuration for one ADEPT neural benchmark run."""
 
     dataset_name: str = "P12"
     seq_len: int | None = None
@@ -224,7 +224,7 @@ class ChronoaConfig:
         seq_len = int(self.seq_len or defaults["seq_len"])
         pred_len = int(self.pred_len or defaults["pred_len"])
         run_name = self.run_name or f"{RUN_NAME_PREFIX}_{dataset_name.lower()}"
-        output_dir = self.output_dir or Path("chronoa_results") / dataset_name.lower()
+        output_dir = self.output_dir or Path("adept_results") / dataset_name.lower()
         output_dir.mkdir(parents=True, exist_ok=True)
 
         object.__setattr__(self, "dataset_name", dataset_name)
@@ -777,7 +777,7 @@ def build_neural_samples(
 
 def choose_device(config: ChronoaConfig) -> object:
     if torch is None:
-        raise RuntimeError("Chronoa-EDGE requires PyTorch. Install torch before running Chronoa.")
+        raise RuntimeError("ADEPT requires PyTorch. Install torch before running ADEPT.")
     requested = str(config.device).lower()
     if requested == "auto":
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -1016,7 +1016,7 @@ if nn is not None:
             return self.kernel_projection(torch.cat(contexts, dim=-1))
 
         def scalar_experts(self, batch: Batch) -> tuple[object, object]:
-            """Cheap query-level temporal experts used by the APEX gate."""
+            """Cheap query-level temporal experts used by the ADEPT gate."""
             event_times = batch.event_times
             event_values = batch.event_values
             event_vars = batch.event_vars
@@ -1173,7 +1173,7 @@ def train_neural_model(
     logger: logging.Logger,
 ) -> tuple[object, pd.DataFrame]:
     if nn is None or torch is None:
-        raise RuntimeError("Chronoa-EDGE requires PyTorch.")
+        raise RuntimeError("ADEPT requires PyTorch.")
     torch.manual_seed(int(config.random_seed))
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(int(config.random_seed))
@@ -1446,7 +1446,7 @@ def run(config: ChronoaConfig) -> dict[str, float | str]:
         label="validation",
     )
     if not train_samples or not validation_samples:
-        raise RuntimeError("Chronoa-EDGE needs non-empty train and validation splits.")
+        raise RuntimeError("ADEPT needs non-empty train and validation splits.")
 
     total_start = time.time()
     model, training_log = train_neural_model(train_samples, validation_samples, benchmark, config, device, logger)

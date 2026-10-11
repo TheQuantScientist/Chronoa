@@ -1,1 +1,1 @@
-"""Chronoa local experiment code."""
+"""ADEPT local experiment code."""

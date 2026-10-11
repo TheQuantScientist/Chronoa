@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build compact Chronoa-EDGE architecture, perturbation, and sweep tables."""
+"""Build compact ADEPT architecture, perturbation, and sweep tables."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "chronoa_experiments" / "tables"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "adept_experiments" / "tables"
 METRIC_COLUMNS = {
     "global": ("MAE_scaled", "MSE_scaled"),
     "equal-variable": ("Equal_variable_MAE_scaled", "Equal_variable_MSE_scaled"),
@@ -18,7 +18,7 @@ METRIC_COLUMNS = {
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate Chronoa-EDGE experiment tables from a summary CSV.")
+    parser = argparse.ArgumentParser(description="Generate ADEPT experiment tables from a summary CSV.")
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--kind", choices=["architecture", "temporal", "sweep"], required=True)
@@ -81,7 +81,7 @@ def label_row(row: pd.Series, kind: str) -> str:
     if kind == "architecture":
         ablation = str(row.get("Architecture_ablation", "full") or "full")
         if ablation == "full":
-            return "full Chronoa-EDGE"
+            return "full ADEPT"
         return ablation.replace("_", " ")
     if kind == "temporal":
         keep_fraction = float(row.get("History_keep_fraction", 1.0) or 1.0)
@@ -118,14 +118,14 @@ def experiment_table(frame: pd.DataFrame, kind: str) -> pd.DataFrame:
 
 def markdown_table(frame: pd.DataFrame, kind: str, metric_mode: str) -> str:
     title = {
-        "architecture": "Chronoa-EDGE Neural Architecture Ablation",
-        "temporal": "Chronoa-EDGE Temporal-Information Test",
-        "sweep": "Chronoa-EDGE Lookback/Horizon Sweep",
+        "architecture": "ADEPT Neural Architecture Ablation",
+        "temporal": "ADEPT Temporal-Information Test",
+        "sweep": "ADEPT Lookback/Horizon Sweep",
     }[kind]
     lines = [
         f"# {title}",
         "",
-        f"Metric mode: `{metric_mode}`. Lower is better. Deltas are row metric minus the full/default Chronoa-EDGE baseline.",
+        f"Metric mode: `{metric_mode}`. Lower is better. Deltas are row metric minus the full/default ADEPT baseline.",
         "",
         "| Dataset | Condition | MAE | Delta MAE | MSE | Delta MSE | Predictions |",
         "|---|---|---:|---:|---:|---:|---:|",
@@ -145,7 +145,7 @@ def main() -> None:
     args = parse_args()
     frame = experiment_table(load_summary(args.summary, args.metric_mode), args.kind)
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"chronoa_{args.kind}_{args.metric_mode.replace('-', '_')}"
+    stem = f"adept_{args.kind}_{args.metric_mode.replace('-', '_')}"
     csv_path = args.output_dir / f"{stem}.csv"
     md_path = args.output_dir / f"{stem}.md"
     frame.to_csv(csv_path, index=False)

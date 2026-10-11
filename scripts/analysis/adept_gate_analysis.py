@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize ADEPT/APEX gate logs produced by run_chronoa_forecasting.py."""
+"""Summarize ADEPT gate logs produced by run_chronoa_forecasting.py."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from chronoa.experiments.chronoa_forecasting import GATE_NAMES
+from adept.experiments.chronoa_forecasting import GATE_NAMES
 
 
 def parse_args() -> argparse.Namespace:

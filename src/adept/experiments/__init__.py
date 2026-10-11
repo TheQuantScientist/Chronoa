@@ -1,1 +1,1 @@
-"""Runnable Chronoa experiments."""
+"""Runnable ADEPT experiments."""

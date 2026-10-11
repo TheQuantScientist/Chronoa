@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthetic stress test for the Chronoa-EDGE neural event graph model."""
+"""Synthetic stress test for the ADEPT neural event graph model."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from chronoa.experiments.chronoa_forecasting import (  # noqa: E402
+from adept.experiments.chronoa_forecasting import (  # noqa: E402
     Batch,
     ChronoaEventGraphNet,
     NeuralSample,
@@ -23,11 +23,11 @@ from chronoa.experiments.chronoa_forecasting import (  # noqa: E402
     masked_loss,
 )
 
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "chronoa_experiments" / "synthetic_stress"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "adept_experiments" / "synthetic_stress"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run a synthetic Chronoa-EDGE neural stress test.")
+    parser = argparse.ArgumentParser(description="Run a synthetic ADEPT neural stress test.")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--n-train", type=int, default=256)
     parser.add_argument("--n-test", type=int, default=128)

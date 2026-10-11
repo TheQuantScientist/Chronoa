@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Run Chronoa-EDGE windows for a balanced cross-model L/H grid.
+"""Run ADEPT windows for a balanced cross-model L/H grid.
 
-This fills neural Chronoa-EDGE results for lookback/horizon settings used by the
+This fills ADEPT results for lookback/horizon settings used by the
 cross-baseline window sweep. Existing result CSVs are reused unless --overwrite
 is passed.
 """
@@ -19,7 +19,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from chronoa.experiments.chronoa_forecasting import ChronoaConfig, run  # noqa: E402
+from adept.experiments.chronoa_forecasting import ChronoaConfig, run  # noqa: E402
 
 
 BALANCED_WINDOWS: dict[str, list[tuple[int, int]]] = {
@@ -42,7 +42,7 @@ class Job:
 
     @property
     def run_name(self) -> str:
-        return f"chronoa_{self.dataset.lower()}_{self.tag}"
+        return f"adept_{self.dataset.lower()}_{self.tag}"
 
     def output_dir(self, output_root: Path) -> Path:
         return output_root / "window" / self.dataset.lower()
@@ -53,7 +53,7 @@ class Job:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-root", type=Path, default=Path("chronoa_experiments"))
+    parser.add_argument("--output-root", type=Path, default=Path("adept_experiments"))
     parser.add_argument("--dataset", action="append", default=[], help="Optional dataset filter; repeatable.")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--random-seed", type=int, default=1729)

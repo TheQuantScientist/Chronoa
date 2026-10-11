@@ -1,4 +1,4 @@
-"""Compute benchmark-style global metrics from a Chronoa detail log."""
+"""Compute benchmark-style global metrics from an ADEPT detail log."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import pandas as pd
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compute global masked MAE/MSE from a Chronoa detail CSV."
+        description="Compute global masked MAE/MSE from an ADEPT detail CSV."
     )
     parser.add_argument(
         "detail_csv",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Chronoa efficiency tables from completed summary CSVs."""
+"""Generate ADEPT efficiency tables from completed summary CSVs."""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ from pathlib import Path
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "chronoa_experiments" / "tables"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "adept_experiments" / "tables"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build Chronoa throughput tables from a summary CSV.")
+    parser = argparse.ArgumentParser(description="Build ADEPT throughput tables from a summary CSV.")
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     return parser.parse_args()
@@ -38,7 +38,7 @@ def efficiency_frame(summary_path: Path) -> pd.DataFrame:
 
 def markdown_efficiency(frame: pd.DataFrame) -> str:
     lines = [
-        "# Chronoa Efficiency",
+        "# ADEPT Efficiency",
         "",
         "Wall time includes calibration plus forecasting for each completed run.",
         "",
@@ -59,8 +59,8 @@ def main() -> None:
     args = parse_args()
     frame = efficiency_frame(args.summary)
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = args.output_dir / "chronoa_efficiency.csv"
-    md_path = args.output_dir / "chronoa_efficiency.md"
+    csv_path = args.output_dir / "adept_efficiency.csv"
+    md_path = args.output_dir / "adept_efficiency.md"
     frame.to_csv(csv_path, index=False)
     md_path.write_text(markdown_efficiency(frame), encoding="utf-8")
     print(f"Wrote {csv_path}")

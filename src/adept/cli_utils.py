@@ -1,4 +1,4 @@
-"""Small CLI parsing helpers shared by Chronoa runner scripts."""
+"""Small CLI parsing helpers shared by ADEPT runner scripts."""
 
 from __future__ import annotations
 

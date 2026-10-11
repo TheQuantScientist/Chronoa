@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Run the Chronoa-EDGE experiment suites used by the paper.
+"""Run the ADEPT experiment suites used by the paper.
 
-Chronoa-EDGE is an end-to-end neural event graph forecaster. The suites are:
+ADEPT is an end-to-end neural event graph forecaster. The suites are:
   * standard: main neural model on the four benchmark windows
   * architecture: neural component ablations
   * temporal: history perturbation and sparsity stress tests
@@ -26,8 +26,8 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from chronoa.cli_utils import split_csv_values, unique_preserve_order  # noqa: E402
-from chronoa.experiments.chronoa_forecasting import (  # noqa: E402
+from adept.cli_utils import split_csv_values, unique_preserve_order  # noqa: E402
+from adept.experiments.chronoa_forecasting import (  # noqa: E402
     ARCHITECTURE_ABLATIONS,
     HISTORY_PERTURBATIONS,
     ChronoaConfig,
@@ -63,14 +63,14 @@ class Job:
         return output_root / self.suite / self.dataset.lower()
 
     def run_name(self) -> str:
-        return f"chronoa_{self.dataset.lower()}_{self.run_tag}"
+        return f"adept_{self.dataset.lower()}_{self.run_tag}"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run Chronoa-EDGE paper experiment suites.")
+    parser = argparse.ArgumentParser(description="Run ADEPT paper experiment suites.")
     parser.add_argument("--suite", action="append", default=[], help="standard, architecture, temporal, window, or all. Repeatable/comma-separated.")
     parser.add_argument("--dataset", action="append", default=[], help="P12, MIMIC, USHCN, HumanActivity, or all. Repeatable/comma-separated.")
-    parser.add_argument("--output-root", type=Path, default=Path("chronoa_experiments"))
+    parser.add_argument("--output-root", type=Path, default=Path("adept_experiments"))
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--max-test-samples", type=int, default=None, help="Optional smoke-test cap per dataset.")
     parser.add_argument("--max-train-samples", type=int, default=None, help="Optional cap on training samples.")

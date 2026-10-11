@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Point-2 reviewer controls for ADEPT/APEX:
+# Point-2 reviewer controls for ADEPT:
 #   1) MSE-only objective ablation.
 #   2) Default-loss gate/expert diagnostics.
 

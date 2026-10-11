@@ -1,4 +1,4 @@
-"""Repository path helpers used by Chronoa scripts and packages."""
+"""Repository path helpers used by ADEPT scripts and packages."""
 
 from __future__ import annotations
 

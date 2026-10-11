@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "chronoa"
+name = "adept-imts"
 version = "0.1.0"
-description = "Chronoa forecasting model and irregular time-series benchmark utilities."
+description = "ADEPT forecasting model and irregular time-series benchmark utilities."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -46,6 +46,8 @@ target-version = "py310"
 extend-exclude = [
     "vendor/upstream_benchmark/data/physionet.org",
     "vendor/upstream_benchmark/storage",
+    "adept_results*",
+    "adept_experiments*",
     "chronoa_results*",
     "cross_baseline_results",
     "reruns",
