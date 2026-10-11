@@ -18,11 +18,13 @@ from chronoa.cli_utils import slugify, split_csv_values, unique_preserve_order
 from chronoa.experiments.chronoa_forecasting import (
     ARCHITECTURE_ABLATIONS,
     HISTORY_PERTURBATIONS,
+    LOSS_MODES,
     RUN_NAME_PREFIX,
     ChronoaConfig,
     canonical_architecture_ablation,
     canonical_dataset_name,
     canonical_history_perturbation,
+    canonical_loss_mode,
     run,
 )
 
@@ -42,11 +44,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seq-len", type=int, default=None, help="Override benchmark lookback length.")
     parser.add_argument("--pred-len", type=int, default=None, help="Override benchmark prediction length.")
     parser.add_argument("--architecture-ablation", choices=ARCHITECTURE_ABLATIONS, default="full")
+    parser.add_argument("--loss-mode", choices=LOSS_MODES, default="default", help="default uses the released Chronoa mixed objective; mse uses MSE-only training.")
     parser.add_argument("--history-perturbation", choices=HISTORY_PERTURBATIONS, default="original")
     parser.add_argument("--history-keep-fraction", type=float, default=1.0)
     parser.add_argument("--random-seed", type=int, default=1729)
     parser.add_argument("--run-tag", default="", help="Optional suffix added to output artifact names.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite this run's CSV/log artifacts.")
+    parser.add_argument("--save-gate-log", action="store_true", help="Save APEX gate weights and scalar expert values for each evaluated query.")
+    parser.add_argument("--max-gate-log-rows", type=int, default=None, help="Optional cap on per-query gate log rows.")
     parser.add_argument("--max-test-samples", type=int, default=None, help="Smoke-test limit on test samples per dataset.")
     parser.add_argument("--max-train-samples", type=int, default=None, help="Optional cap on training samples.")
     parser.add_argument("--max-validation-samples", type=int, default=None, help="Optional cap on validation samples.")
@@ -82,6 +87,11 @@ def run_name_suffix(args: argparse.Namespace) -> str:
     ablation = canonical_architecture_ablation(args.architecture_ablation)
     if ablation != "full":
         parts.append(ablation)
+    loss_mode = canonical_loss_mode(args.loss_mode)
+    if loss_mode != "default":
+        parts.append(f"loss_{loss_mode}")
+    if args.save_gate_log:
+        parts.append("gate")
     perturbation = canonical_history_perturbation(args.history_perturbation)
     if perturbation != "original":
         parts.append(perturbation)
@@ -109,12 +119,15 @@ def main() -> None:
             max_train_samples=args.max_train_samples,
             max_validation_samples=args.max_validation_samples,
             architecture_ablation=args.architecture_ablation,
+            loss_mode=args.loss_mode,
             history_perturbation=args.history_perturbation,
             history_keep_fraction=args.history_keep_fraction,
             random_seed=args.random_seed,
             overwrite=args.overwrite,
             run_name=run_name,
             output_dir=output_dir,
+            save_gate_log=args.save_gate_log,
+            max_gate_log_rows=args.max_gate_log_rows,
             trace_every=args.trace_every,
             progress_every=args.progress_every,
             max_events=args.max_events,

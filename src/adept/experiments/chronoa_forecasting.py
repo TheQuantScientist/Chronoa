@@ -73,6 +73,12 @@ ARCHITECTURE_ABLATIONS = (
     "no_time_encoding",
     "direct_decoder",
 )
+LOSS_MODES = (
+    "default",
+    "mse",
+)
+GATE_NAMES = ("neural", "same_last", "same_ema", "trend", "graph_ema", "global_ema")
+SCALAR_EXPERT_NAMES = ("same_last", "same_ema", "trend", "graph_ema", "global_ema")
 
 
 def stable_seed(*parts: object) -> int:
@@ -147,6 +153,23 @@ def canonical_architecture_ablation(name: str) -> str:
         raise ValueError(f"Unsupported architecture ablation {name!r}. Use one of: {supported}") from exc
 
 
+def canonical_loss_mode(name: str) -> str:
+    normalized = name.strip().replace("-", "_").replace(" ", "_").lower()
+    aliases = {
+        "default": "default",
+        "mixed": "default",
+        "released": "default",
+        "paper": "default",
+        "mse": "mse",
+        "mse_only": "mse",
+    }
+    try:
+        return aliases[normalized]
+    except KeyError as exc:
+        supported = ", ".join(LOSS_MODES)
+        raise ValueError(f"Unsupported loss mode {name!r}. Use one of: {supported}") from exc
+
+
 @dataclass(frozen=True)
 class ChronoaConfig:
     """Configuration for one Chronoa-EDGE neural benchmark run."""
@@ -158,6 +181,7 @@ class ChronoaConfig:
     max_train_samples: int | None = None
     max_validation_samples: int | None = None
     architecture_ablation: str = "full"
+    loss_mode: str = "default"
     history_perturbation: str = "original"
     history_keep_fraction: float = 1.0
     random_seed: int = 1729
@@ -168,7 +192,10 @@ class ChronoaConfig:
     checkpoint_csv: Path | None = None
     detail_log_csv: Path | None = None
     training_log_csv: Path | None = None
+    gate_log_csv: Path | None = None
     debug_log: Path | None = None
+    save_gate_log: bool = False
+    max_gate_log_rows: int | None = None
     trace_every: int = 0
     progress_every: int = 100
     trace_history_points: int = 5
@@ -189,6 +216,7 @@ class ChronoaConfig:
     def __post_init__(self) -> None:
         dataset_name = canonical_dataset_name(self.dataset_name)
         architecture_ablation = canonical_architecture_ablation(self.architecture_ablation)
+        loss_mode = canonical_loss_mode(self.loss_mode)
         history_perturbation = canonical_history_perturbation(self.history_perturbation)
         if not (0.0 < float(self.history_keep_fraction) <= 1.0):
             raise ValueError(f"history_keep_fraction must be in (0, 1], got {self.history_keep_fraction}")
@@ -201,6 +229,7 @@ class ChronoaConfig:
 
         object.__setattr__(self, "dataset_name", dataset_name)
         object.__setattr__(self, "architecture_ablation", architecture_ablation)
+        object.__setattr__(self, "loss_mode", loss_mode)
         object.__setattr__(self, "history_perturbation", history_perturbation)
         object.__setattr__(self, "seq_len", seq_len)
         object.__setattr__(self, "pred_len", pred_len)
@@ -214,6 +243,7 @@ class ChronoaConfig:
         object.__setattr__(self, "checkpoint_csv", default_path(self.checkpoint_csv, "Checkpoint.csv"))
         object.__setattr__(self, "detail_log_csv", default_path(self.detail_log_csv, "DetailLog.csv"))
         object.__setattr__(self, "training_log_csv", default_path(self.training_log_csv, "TrainingLog.csv"))
+        object.__setattr__(self, "gate_log_csv", default_path(self.gate_log_csv, "GateLog.csv"))
         object.__setattr__(self, "debug_log", default_path(self.debug_log, "debug.log"))
 
 
@@ -1039,7 +1069,7 @@ if nn is not None:
             experts = torch.stack([same_last, same_ema, trend, graph_ema, global_ema], dim=-1)
             return torch.clamp(experts, min=-12.0, max=12.0), same_has
 
-        def forward(self, batch: Batch) -> object:
+        def forward(self, batch: Batch, return_diagnostics: bool = False) -> object:
             memory = self.encode_events(batch.event_times, batch.event_vars, batch.event_values, batch.event_mask)
             query_tokens = self.build_queries(batch.query_times, batch.query_vars)
             if self.direct_decoder:
@@ -1068,6 +1098,7 @@ if nn is not None:
             decoder_input = torch.cat([query_tokens, attention_context, kernel_context, graph_context, gap_context], dim=-1)
             decoder_hidden = self.decoder_backbone(decoder_input)
             neural_decoded = self.decoder_head(decoder_hidden).squeeze(-1)
+            diagnostics: dict[str, object] = {}
             if self.apex_decoder:
                 experts, same_has = self.scalar_experts(batch)
                 gate_input = torch.cat([decoder_hidden, experts, same_has, gap], dim=-1)
@@ -1075,14 +1106,34 @@ if nn is not None:
                 expert_stack = torch.cat([neural_decoded.unsqueeze(-1), experts], dim=-1)
                 residual = 0.05 * torch.tanh(self.expert_residual(gate_input)).squeeze(-1)
                 decoded = torch.sum(gate_weights * expert_stack, dim=-1) + residual
+                if return_diagnostics:
+                    diagnostics = {
+                        "gate_weights": gate_weights,
+                        "experts": experts,
+                        "neural_decoded": neural_decoded,
+                        "residual": residual,
+                        "same_has": same_has,
+                        "gap": gap,
+                    }
             else:
                 decoded = neural_decoded
-            return decoded.masked_fill(~batch.query_mask, 0.0)
+            decoded = decoded.masked_fill(~batch.query_mask, 0.0)
+            if return_diagnostics:
+                return decoded, diagnostics
+            return decoded
 
 
-def masked_loss(prediction: object, target: object, mask: object, architecture: str = "full") -> object:
+def masked_loss(
+    prediction: object,
+    target: object,
+    mask: object,
+    architecture: str = "full",
+    loss_mode: str = "default",
+) -> object:
     error = prediction[mask] - target[mask]
     mse = torch.mean(error**2)
+    if canonical_loss_mode(loss_mode) == "mse":
+        return mse
     huber = torch.nn.functional.smooth_l1_loss(prediction[mask], target[mask], beta=0.5)
     mae = torch.mean(torch.abs(error))
     if architecture == "apex":
@@ -1143,7 +1194,7 @@ def train_neural_model(
     stale_epochs = 0
     rows: list[dict[str, float | int | str]] = []
 
-    logger.info("  Training %s (%s) on %s", MODEL_NAME, config.architecture_ablation, device)
+    logger.info("  Training %s (%s, loss=%s) on %s", MODEL_NAME, config.architecture_ablation, config.loss_mode, device)
     logger.info("  Train samples=%s, validation samples=%s", len(train_samples), len(validation_samples))
     for epoch in range(1, int(config.epochs) + 1):
         model.train()
@@ -1158,7 +1209,13 @@ def train_neural_model(
             seed=stable_seed(config.random_seed, epoch),
         ):
             prediction = model(batch)
-            loss = masked_loss(prediction, batch.query_targets, batch.query_mask, architecture=config.architecture_ablation)
+            loss = masked_loss(
+                prediction,
+                batch.query_targets,
+                batch.query_mask,
+                architecture=config.architecture_ablation,
+                loss_mode=config.loss_mode,
+            )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -1169,14 +1226,16 @@ def train_neural_model(
         scheduler.step()
         train_loss = running / max(seen, 1)
         val_metrics = evaluate_neural_model(model, validation_samples, config, benchmark.lookback_span, device)
-        mae_score_weight = 0.25 if config.architecture_ablation == "apex" else 0.05
+        mae_score_weight = 0.0 if config.loss_mode == "mse" else (0.25 if config.architecture_ablation == "apex" else 0.05)
         score = val_metrics["MSE_scaled"] + mae_score_weight * val_metrics["MAE_scaled"]
         rows.append(
             {
                 "Epoch": epoch,
+                "Loss_mode": config.loss_mode,
                 "Train_loss": train_loss,
                 "Validation_MAE_scaled": val_metrics["MAE_scaled"],
                 "Validation_MSE_scaled": val_metrics["MSE_scaled"],
+                "Validation_score": score,
                 "Validation_predictions": val_metrics["Predictions"],
                 "Learning_rate": float(optimizer.param_groups[0]["lr"]),
             }
@@ -1220,6 +1279,36 @@ def predict_samples(
     return predictions
 
 
+def predict_samples_with_gate_diagnostics(
+    model: object,
+    samples: list[NeuralSample],
+    config: ChronoaConfig,
+    lookback_span: float,
+    device: object,
+) -> tuple[list[np.ndarray], list[dict[str, np.ndarray]]]:
+    model.eval()
+    predictions: list[np.ndarray] = []
+    diagnostics_by_sample: list[dict[str, np.ndarray]] = []
+    with torch.no_grad():
+        for batch_samples, batch in iter_batches(samples, config.batch_size, lookback_span, device, shuffle=False, seed=config.random_seed):
+            batch_prediction, batch_diagnostics = model(batch, return_diagnostics=True)
+            prediction_array = batch_prediction.detach().cpu().numpy()
+            diagnostic_arrays = {
+                name: value.detach().cpu().numpy()
+                for name, value in batch_diagnostics.items()
+            }
+            for row_index, sample in enumerate(batch_samples):
+                n_queries = len(sample.query_targets)
+                predictions.append(prediction_array[row_index, :n_queries].astype(float))
+                diagnostics_by_sample.append(
+                    {
+                        name: array[row_index, :n_queries].astype(float)
+                        for name, array in diagnostic_arrays.items()
+                    }
+                )
+    return predictions, diagnostics_by_sample
+
+
 def compute_global_scaled_metrics(detail_log_csv: Path) -> dict[str, float] | None:
     if not detail_log_csv.exists():
         return None
@@ -1252,6 +1341,8 @@ def experiment_variant(config: ChronoaConfig) -> str:
     parts: list[str] = []
     if config.architecture_ablation != "full":
         parts.append(config.architecture_ablation)
+    if config.loss_mode != "default":
+        parts.append(f"loss_{config.loss_mode}")
     if config.history_perturbation != "original":
         parts.append(config.history_perturbation)
     if float(config.history_keep_fraction) < 1.0:
@@ -1286,6 +1377,7 @@ def variable_result_rows(detail_rows: list[dict], columns: list[str], benchmark_
                 "Seq_len": config.seq_len,
                 "Pred_len": config.pred_len,
                 "Architecture_ablation": config.architecture_ablation,
+                "Loss_mode": config.loss_mode,
                 "History_perturbation": config.history_perturbation,
                 "MAE_scaled": round(float(group["AE_scaled"].mean()), 6),
                 "MSE_scaled": round(float(group["SE_scaled"].mean()), 6),
@@ -1310,6 +1402,7 @@ def run(config: ChronoaConfig) -> dict[str, float | str]:
             config.checkpoint_csv,
             config.detail_log_csv,
             config.training_log_csv,
+            config.gate_log_csv,
             config.debug_log,
         ):
             artifact_path.unlink(missing_ok=True)
@@ -1322,6 +1415,7 @@ def run(config: ChronoaConfig) -> dict[str, float | str]:
     logger.info("Model: %s", MODEL_NAME)
     logger.info("Variant: %s", variant)
     logger.info("Architecture ablation: %s", config.architecture_ablation)
+    logger.info("Loss mode: %s", config.loss_mode)
     logger.info("History perturbation for evaluation: %s", config.history_perturbation)
     logger.info("Output directory: %s", config.output_dir)
     logger.info("Loading %s data through the benchmark pipeline...", config.dataset_name)
@@ -1372,11 +1466,24 @@ def run(config: ChronoaConfig) -> dict[str, float | str]:
     if not test_samples:
         raise RuntimeError("No valid test samples were produced.")
 
-    predictions = predict_samples(model, test_samples, config, benchmark.lookback_span, device)
+    if config.save_gate_log and config.architecture_ablation == "apex":
+        predictions, gate_diagnostics = predict_samples_with_gate_diagnostics(
+            model,
+            test_samples,
+            config,
+            benchmark.lookback_span,
+            device,
+        )
+    else:
+        if config.save_gate_log:
+            logger.warning("Gate logging was requested but only the apex architecture has gate diagnostics.")
+        predictions = predict_samples(model, test_samples, config, benchmark.lookback_span, device)
+        gate_diagnostics = [{} for _ in predictions]
     detail_rows: list[dict] = []
+    gate_rows: list[dict] = []
     valid_sample_count = 0
     eval_start = time.time()
-    for sample, predicted_values in zip(test_samples, predictions):
+    for sample, predicted_values, gate_diag in zip(test_samples, predictions, gate_diagnostics):
         valid_sample_count += 1
         trace_sample = should_trace_sample(valid_sample_count, config)
         if trace_sample:
@@ -1401,23 +1508,27 @@ def run(config: ChronoaConfig) -> dict[str, float | str]:
             ae_raw = abs(actual_raw - predicted_raw)
             history_times, history_values = sample.history_by_var.get(var_index, ([], []))
             history_diag = history_diagnostics(history_times, history_values)
+            detail_base = {
+                "Dataset": benchmark.name,
+                "Method": method_label,
+                "Base_method": MODEL_NAME,
+                "Variant": variant,
+                "Seq_len": config.seq_len,
+                "Pred_len": config.pred_len,
+                "Architecture_ablation": config.architecture_ablation,
+                "Loss_mode": config.loss_mode,
+                "History_perturbation": config.history_perturbation,
+                "History_keep_fraction": config.history_keep_fraction,
+                "Variable": variable_name,
+                "Entity": sample.key,
+                "Step": int(sample.query_steps[query_index]),
+                "Target_time": round(float(sample.query_times[query_index]), 2),
+                "Actual_scaled": round(actual_scaled, 6),
+                "Predicted_scaled": round(predicted_scaled, 6),
+            }
             detail_rows.append(
                 {
-                    "Dataset": benchmark.name,
-                    "Method": method_label,
-                    "Base_method": MODEL_NAME,
-                    "Variant": variant,
-                    "Seq_len": config.seq_len,
-                    "Pred_len": config.pred_len,
-                    "Architecture_ablation": config.architecture_ablation,
-                    "History_perturbation": config.history_perturbation,
-                    "History_keep_fraction": config.history_keep_fraction,
-                    "Variable": variable_name,
-                    "Entity": sample.key,
-                    "Step": int(sample.query_steps[query_index]),
-                    "Target_time": round(float(sample.query_times[query_index]), 2),
-                    "Actual_scaled": round(actual_scaled, 6),
-                    "Predicted_scaled": round(predicted_scaled, 6),
+                    **detail_base,
                     "Actual_raw": round(actual_raw, 4),
                     "Predicted_raw": round(predicted_raw, 4),
                     "AE_scaled": round(ae_scaled, 6),
@@ -1432,6 +1543,43 @@ def run(config: ChronoaConfig) -> dict[str, float | str]:
                     "History_mode_fraction": round(float(history_diag.get("History_mode_fraction", float("nan"))), 6),
                 }
             )
+            if gate_diag and (
+                config.max_gate_log_rows is None
+                or len(gate_rows) < int(config.max_gate_log_rows)
+            ):
+                gate_weights = gate_diag["gate_weights"][query_index]
+                experts = gate_diag["experts"][query_index]
+                neural_decoded = float(gate_diag["neural_decoded"][query_index])
+                residual = float(gate_diag["residual"][query_index])
+                same_has = float(np.squeeze(gate_diag["same_has"][query_index]))
+                query_gap = float(np.squeeze(gate_diag["gap"][query_index]))
+                expert_stack = np.concatenate([[neural_decoded], experts])
+                gate_entropy = -float(np.sum(gate_weights * np.log(np.clip(gate_weights, 1e-12, 1.0))))
+                gate_row = {
+                    **detail_base,
+                    "AE_scaled": round(ae_scaled, 6),
+                    "SE_scaled": round(se_scaled, 6),
+                    "Same_variable_available": int(same_has > 0.5),
+                    "Query_gap_normalized": round(query_gap, 6),
+                    "Neural_decoded": round(neural_decoded, 6),
+                    "Residual": round(residual, 6),
+                    "Expert_mixture_scaled": round(float(np.sum(gate_weights * expert_stack)), 6),
+                    "Gate_entropy": round(gate_entropy, 6),
+                    "Gate_top": GATE_NAMES[int(np.argmax(gate_weights))],
+                }
+                gate_row.update(
+                    {
+                        f"Gate_{name}": round(float(gate_weights[index]), 6)
+                        for index, name in enumerate(GATE_NAMES)
+                    }
+                )
+                gate_row.update(
+                    {
+                        f"Expert_{name}": round(float(experts[index]), 6)
+                        for index, name in enumerate(SCALAR_EXPERT_NAMES)
+                    }
+                )
+                gate_rows.append(gate_row)
         if trace_sample:
             logger.info(
                 "    [PRED] actual=%s predicted=%s",
@@ -1452,6 +1600,9 @@ def run(config: ChronoaConfig) -> dict[str, float | str]:
             )
 
     pd.DataFrame(detail_rows).to_csv(config.detail_log_csv, index=False)
+    if config.save_gate_log:
+        pd.DataFrame(gate_rows).to_csv(config.gate_log_csv, index=False)
+        logger.info("Gate log CSV: %s (%s rows)", config.gate_log_csv, len(gate_rows))
     result_rows = variable_result_rows(detail_rows, benchmark.columns, benchmark.name, method_label, variant, config)
     results = pd.DataFrame(result_rows)
     results.to_csv(config.output_csv, index=False)
@@ -1503,6 +1654,7 @@ def run(config: ChronoaConfig) -> dict[str, float | str]:
         "Seq_len": config.seq_len,
         "Pred_len": config.pred_len,
         "Architecture_ablation": config.architecture_ablation,
+        "Loss_mode": config.loss_mode,
         "History_perturbation": config.history_perturbation,
         "History_keep_fraction": float(config.history_keep_fraction),
         "Equal_variable_MAE_scaled": avg_mae,
@@ -1513,6 +1665,7 @@ def run(config: ChronoaConfig) -> dict[str, float | str]:
         "CPU_Total_s": total_elapsed,
         "CPU_ms_per_pred": cpu_ms_per_pred,
         "CPU_pred_per_s": cpu_pred_per_s,
+        "Gate_log_rows": float(len(gate_rows)),
     }
     if global_metrics is not None:
         summary.update({"MAE_scaled": global_metrics["MAE_scaled"], "MSE_scaled": global_metrics["MSE_scaled"]})

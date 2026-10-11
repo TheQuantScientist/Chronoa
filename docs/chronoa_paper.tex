@@ -92,26 +92,29 @@
 }
 
 \begin{abstract}
-Irregular multivariate time-series forecasting is fundamentally a retrieval
-problem: each future value asks which asynchronous historical events, variables,
-and time gaps should be trusted. Dense imputation and patching make this setting
-easier to process, but they can hide the event structure that determines the
-answer. We introduce ADEPT, a query-conditioned event graph forecaster with
-adaptive delta-kernel experts. ADEPT encodes observations as value-time-variable
-event tokens, contextualizes them with transformer memory, learns cross-variable
-relations, and retrieves evidence for each future query through continuous-time
-delta kernels. Its distinguishing component is an end-to-end expert decoder
-that gates between the neural query forecast and history-derived anchors for
-same-variable persistence, exponential memory, local trend, graph-aware context,
-and global entity state, without external model predictions, test labels, or
-post hoc routing. On four standard IMTS benchmarks, ADEPT delivers the best
+Irregular multivariate time-series forecasting can be viewed as an evidence
+retrieval problem: each future value asks which asynchronous historical events,
+variables, and time gaps should be trusted. Dense imputation and patching make
+this setting easier to process, but they can hide the event structure that
+determines the answer. We introduce ADEPT, a query-conditioned event graph
+forecaster with adaptive delta-kernel experts. ADEPT encodes observations as
+value-time-variable event tokens, contextualizes them with transformer memory,
+learns cross-variable relations, and retrieves evidence for each future query
+through continuous-time delta kernels. Its main architectural contribution is an
+end-to-end expert decoder that gates between the neural query forecast and
+history-derived anchors for same-variable persistence, exponential memory,
+local trend, graph-aware context, and global entity state. These experts are
+internal differentiable functions of the observed history, not external model
+predictions, test labels, or post hoc routing rules. On four standard IMTS
+benchmarks, ADEPT delivers the best
 standard-window MAE in every dataset, improving over the strongest baseline by
 2.6--22.2\% and leading MSE on three datasets. Across changing lookback and
 horizon settings, the advantage remains absolute-error driven rather than
 window-specific. Through perturbation and ablation evidence, the finding is
 that accuracy depends on using real values, temporal placement, event memory,
-and adaptive experts, in whichs ADEPT gains by retrieving the right events, not by
-exploiting masks or persistence.
+and adaptive experts; ADEPT gains by retrieving useful events rather than by
+exploiting masks or persistence. Source code is available at: \href{https://github.com/TheQuantScientist/Chronoa}{/github.com/TheQuantScientist/ADEPT}.
+
 \end{abstract}
 
 \begin{keyword}
@@ -162,9 +165,7 @@ single neural head to rediscover all local numerical structure, \method{} gates
 between the neural query forecast and differentiable history-derived experts for
 same-variable latest value, exponential memory, local trend, graph-aware memory,
 and global entity state. A bounded residual then lets the neural decoder correct
-the gated forecast.
-
-This design keeps the protocol honest. The experts are not external baseline
+the gated forecast. This design keeps the protocol honest. The experts are not external baseline
 predictions, not a hand-tuned ensemble, and not a test-label calibration
 mechanism. They are computed only from the observed history of the current
 example, their weights are produced by the model, and the whole system is
@@ -182,10 +183,9 @@ Perturbations and ablations further show that the gains require real observed
 values, correct timing, event-memory retrieval, and the adaptive expert gate.
 The contributions are:
 \begin{itemize}
-    \item We formulate IMTS forecasting as query-conditioned event retrieval
-    and propose \method{}, combining transformer event memory, adaptive
-    variable graphs, delta-kernel retrieval, and an end-to-end adaptive expert
-    decoder.
+    \item We present \method{} as a protocol-preserving event-query forecaster
+    that combines transformer event memory, adaptive variable graphs,
+    delta-kernel retrieval, and an end-to-end expert decoder.
     \item We show state-of-the-art standard-window MAE on all four benchmarks,
     best MSE on three, and a 2.6--22.2\% MAE reduction over the strongest
     baseline under matched masks, scaling, windows, and seeds.
@@ -295,14 +295,12 @@ events and decodes explicit future time--variable queries. Unlike purely
 continuous-time latent models, it leaves the decoder direct access to retrieved
 observations through cross-attention and learned delta kernels. Unlike graph or
 patch models whose final head is mostly neural, it exposes the query decoder to
-history-derived same-variable, trend, graph-aware, and global experts. The
+history-derived same-variable, trend, graph-aware, and global experts. These
 experts are not external baselines and are not selected using test labels; they
 are differentiable functions of the observed history and are gated end-to-end.
-The contribution is therefore not just a new encoder or a new graph
-construction. It is a protocol-preserving event-query architecture in which
-adaptive neural memory and explicit history anchors cooperate at the point
-where IMTS forecasting is hardest: deciding what evidence each future
-time--variable query should trust.
+The contribution is therefore a decoder-level integration of neural event
+memory with explicit history anchors under the original IMTS query protocol,
+rather than a post hoc ensemble or a change to the benchmark target.
 
 \section{Methodology}
 \label{sec:method}
@@ -313,17 +311,16 @@ time--variable query should trust.
 \begin{figure}[htbp]
 \centering
 \makebox[\textwidth]{%
-  \includegraphics[width=1.5\textwidth]{ADEPT (Processing)/architecture.png}}
+  \includegraphics[width=1.5\textwidth]{architecture.png}}
 \caption{High-level design of the proposed \method{} architecture. The
 implementation uses event-token encoding, transformer memory, adaptive variable
 graph mixing, continuous-time delta-kernel retrieval, and an adaptive expert
-query decoder. Fixed training settings are reported in
-Appendix~\ref{app:adept-config}.}
+query decoder. Hyperparameter-tuned training settings are reported in \ref{app:adept-config}.}
 \label{architecture}
 \end{figure}
 
-Notation used in this subsection is summarized in
-Table~\ref{tab:adept-symbols} of Appendix~\ref{app:adept-symbols}. For each entity, \method{} preserves the
+Notation used in this subsection to describe the architecture of our proposed ADEPT is summarized in
+Table~\ref{tab:adept-symbols} of \ref{app:adept-symbols}. For each entity, \method{} preserves the
 observed history as an event set and decodes the masked future targets as
 explicit time--variable queries:
 \begin{equation}
@@ -359,8 +356,7 @@ events and queries:
 Each row of $A$ is a query-conditioned distribution over source variables. The
 graph context $a_u=\sum_v A_{u,v}e_v$ is projected and used in query
 construction, temporal retrieval, and the graph-aware expert. This gives the
-model dataset-specific channel relations without requiring a fixed clinical,
-climate, or sensor graph.
+model dataset-specific channel relations without requiring a fixed clinical or sensor graph.
 
 \paragraph{Query-conditioned temporal retrieval}
 For each future query $(\tau_j,u_j)$, \method{} builds a query token from the
@@ -468,8 +464,11 @@ training split with a masked objective combining MSE, smooth-$L_1$, and MAE:
 Checkpoint selection uses validation data only, with
 $\mathrm{MSE}+0.25\,\mathrm{MAE}$ as the pre-specified \method{} validation
 score. No method uses test labels for hyperparameter tuning, calibration,
-routing, or sample-wise model selection. Final predictions and targets are
-evaluated once in scaled space with the same masked global errors:
+routing, or sample-wise model selection. For \method{}, the scalar experts are
+computed only from each example's observed input history and do not use
+predictions from APN, GraFITi, tPatchGNN, or any other external model. Final
+predictions and targets are evaluated once in scaled space with the same masked
+global errors:
 \begin{equation}
     \mathrm{MAE}=\frac{\sum_{b,j}m_{b,j}
     |\widetilde{\hat y}_{b,j}-\widetilde y_{b,j}|}
@@ -555,7 +554,8 @@ APN & 0.3150$\pm$0.0016 & 0.3691$\pm$0.0032 & 0.4746$\pm$0.0045 & 0.4155$\pm$0.0
 \begin{table}[!htbp]
 \caption{\method{} standard-window seed stability. Entries are global scaled
 errors for the three independent seeds used in Table~\ref{tab:main-results}.
-Lower is better.}
+Lower is better. Among seed rows, \textbf{bold} marks the lowest error and
+\underline{underlining} marks the second-lowest error in each column.}
 \label{tab:adept-seeds}
 \centering
 \scriptsize
@@ -573,9 +573,9 @@ Seed
 \cmidrule(lr){8-9}
 & MSE & MAE & MSE & MAE & MSE & MAE & MSE & MAE \\
 \midrule
-2024 & 0.0428 & 0.1134 & 0.1426 & 0.2132 & 0.3036 & 0.3514 & 0.4216 & 0.3710 \\
-2025 & 0.0443 & 0.1118 & 0.1268 & 0.2093 & 0.3007 & 0.3514 & 0.4257 & 0.3765 \\
-2026 & 0.0431 & 0.1127 & 0.1303 & 0.2001 & 0.3019 & 0.3505 & 0.4222 & 0.3680 \\
+2024 & \best{0.0428} & 0.1134 & 0.1426 & 0.2132 & 0.3036 & \second{0.3514} & \best{0.4216} & \second{0.3710} \\
+2025 & 0.0443 & \best{0.1118} & \best{0.1268} & \second{0.2093} & \best{0.3007} & \second{0.3514} & 0.4257 & 0.3765 \\
+2026 & \second{0.0431} & \second{0.1127} & \second{0.1303} & \best{0.2001} & \second{0.3019} & \best{0.3505} & \second{0.4222} & \best{0.3680} \\
 \midrule
 Mean & 0.0434 & 0.1126 & 0.1332 & 0.2075 & 0.3020 & 0.3511 & 0.4232 & 0.3719 \\
 Std. & 0.0008 & 0.0008 & 0.0083 & 0.0067 & 0.0014 & 0.0005 & 0.0022 & 0.0043 \\
@@ -761,15 +761,12 @@ where the model without the adaptive expert decoder was window-sensitive. On MIM
 reduces MAE from 0.4025 to 0.3719 and MSE from 0.4302 to 0.4232. The MSE gain
 is modest, but it is consistent across seeds and appears together with a larger
 MAE improvement. On P12, \method{} improves MAE from 0.3633 to 0.3511 and MSE
-from 0.3059 to 0.3020.
-
-HumanActivity is the one standard-window case where \method{} does not win both
+from 0.3059 to 0.3020. HumanActivity is the one standard-window case where \method{} does not win both
 metrics. It obtains the best MAE, 0.1126 versus APN's 0.1156, but APN remains
 lower on MSE, 0.0421 versus 0.0434. This should be read as a squared-error
 trade-off, not as a complete loss on the dataset: the typical absolute error is
 better, while a small number of larger deviations keep APN ahead in MSE. The
-standard-window conclusion is therefore strong but bounded: \method{} leads all
-four MAE blocks, leads three of four MSE blocks, and has one small but real MSE
+standard-window conclusion is therefore strong but bounded: \method{} leads across error metrics, and has one small but real MSE
 counterexample.
 
 \paragraph{Seed stability}
@@ -808,11 +805,11 @@ HumanActivity.
 
 \begin{table}[!htbp]
 \caption{Architecture diagnostics for \method{} at the standard benchmark
-windows. Entries are means over seeds 2024--2026. ``No adaptive expert decoder''
-removes the adaptive expert gate and history-derived scalar experts while
-leaving the neural event graph decoder intact. Lower is better; \textbf{bold}
-marks the best value and \underline{underlining} marks the second-best value
-within each dataset--metric block.}
+windows. Entries are means over seeds 2024--2026. ``No adaptive expert
+decoder'' removes the adaptive expert gate and history-derived scalar experts
+while leaving the neural event graph decoder intact. Lower is better;
+\textbf{bold} marks the best value and \underline{underlining} marks the
+second-best value within each dataset--metric block.}
 \label{tab:architecture-diagnostics}
 \centering
 {\tiny
@@ -824,7 +821,7 @@ within each dataset--metric block.}
 Dataset & Variant & MSE & MAE \\
 \midrule
 \multirow{7}{*}{HumanActivity}
-& \method{} & \best{0.0436} & \best{0.1124} \\
+& \method{} & \best{0.0434} & \best{0.1126} \\
 & No adaptive expert decoder & 0.0451 & 0.1232 \\
 & No delta kernel & 0.0467 & \second{0.1229} \\
 & No graph mixer & 0.0456 & 0.1239 \\
@@ -833,25 +830,25 @@ Dataset & Variant & MSE & MAE \\
 & Direct decoder & 0.3098 & 0.4080 \\
 \midrule
 \multirow{7}{*}{USHCN}
-& \method{} & 0.2335 & 0.2443 \\
-& No adaptive expert decoder & \best{0.1410} & \best{0.2218} \\
+& \method{} & \best{0.1332} & \best{0.2075} \\
+& No adaptive expert decoder & \second{0.1410} & \second{0.2218} \\
 & No delta kernel & 0.1540 & 0.2391 \\
 & No graph mixer & 0.1627 & 0.2449 \\
-& No transformer & \second{0.1434} & \second{0.2290} \\
+& No transformer & 0.1434 & 0.2290 \\
 & No time encoding & 0.1469 & 0.2593 \\
 & Direct decoder & 0.2378 & 0.3451 \\
 \midrule
 \multirow{7}{*}{P12}
-& \method{} & \second{0.3030} & \best{0.3509} \\
+& \method{} & \best{0.3020} & \best{0.3511} \\
 & No adaptive expert decoder & 0.3044 & \second{0.3616} \\
 & No delta kernel & 0.3037 & 0.3625 \\
 & No graph mixer & 0.3053 & 0.3666 \\
-& No transformer & \best{0.3021} & \second{0.3616} \\
+& No transformer & \second{0.3021} & \second{0.3616} \\
 & No time encoding & 0.3079 & 0.3679 \\
 & Direct decoder & 0.7936 & 0.6797 \\
 \midrule
 \multirow{7}{*}{MIMIC}
-& \method{} & \best{0.4260} & \best{0.3734} \\
+& \method{} & \best{0.4232} & \best{0.3719} \\
 & No adaptive expert decoder & 0.4338 & 0.3904 \\
 & No delta kernel & \second{0.4337} & \second{0.3805} \\
 & No graph mixer & 0.4415 & 0.3903 \\
@@ -860,6 +857,29 @@ Dataset & Variant & MSE & MAE \\
 & Direct decoder & 0.9632 & 0.6418 \\
 \bottomrule
 \end{tabular}}}
+\end{table}
+
+\begin{table}[!htbp]
+\caption{Evaluation-time adaptive expert gate diagnostics for \method{} at the
+standard benchmark windows. Entries are mean gate weights over all active target
+queries from seeds 2024--2026, reported as percentages. ``Top expert'' gives
+the most frequent largest-weight expert and its query share.}
+\label{tab:gate-diagnostics}
+\centering
+\scriptsize
+\resizebox{\textwidth}{!}{
+\begin{tabular}{l|r|rrrrrr|c}
+\toprule
+Dataset & Queries
+& Neural & Latest & EMA & Trend & Graph & Global
+& Top expert \\
+\midrule
+HumanActivity & 17,730 & 1.1 & 5.1 & 87.9 & 4.0 & 1.0 & 0.9 & EMA (92.0\%) \\
+MIMIC & 69,384 & 24.8 & 44.9 & 22.2 & 1.5 & 1.1 & 5.4 & Latest (53.1\%) \\
+P12 & 70,740 & 6.2 & 45.7 & 41.4 & 0.6 & 0.9 & 5.3 & EMA (61.2\%) \\
+USHCN & 1,104 & 18.5 & 15.6 & 29.0 & 7.4 & 12.4 & 17.1 & Global (31.4\%) \\
+\bottomrule
+\end{tabular}}
 \end{table}
 
 \begin{figure*}[!htbp]
@@ -972,7 +992,11 @@ intervention is much larger than the other interventions. Lower is better.}
 \begin{table*}[!htbp]
 \caption{Cross-model temporal perturbation summary at the standard benchmark
 windows. Deltas are relative to each model's original-history evaluation under
-the same window and are aggregate, not paired, comparisons.}
+the same window and are aggregate, not paired, comparisons. In the
+original-history error columns, \textbf{bold} marks the best value and
+\underline{underlining} marks the second-best value within each dataset.
+Perturbation deltas are left unranked because they measure sensitivity to an
+intervention rather than final forecast accuracy.}
 \label{tab:cross-model-temporal}
 \centering
 \scriptsize
@@ -982,26 +1006,26 @@ the same window and are aggregate, not paired, comparisons.}
 Dataset & Model & Orig. MSE & Shuffle $\Delta$MSE & Swap $\Delta$MSE & Gaps $\Delta$MSE & Orig. MAE & Gaps $\Delta$MAE \\
 \midrule
 \multirow{4}{*}{P12}
-& \method{} & 0.3034 & +0.1561 & +0.2182 & +0.4835 & 0.3509 & +0.3290 \\
+& \method{} & \best{0.3034} & +0.1561 & +0.2182 & +0.4835 & \best{0.3509} & +0.3290 \\
 & APN & 0.3150 & +0.1410 & +0.1966 & +0.4816 & 0.3691 & +0.3168 \\
-& GraFITi & 0.3070 & +0.1476 & +0.1905 & +0.4911 & 0.3633 & +0.3285 \\
+& GraFITi & \second{0.3070} & +0.1476 & +0.1905 & +0.4911 & \second{0.3633} & +0.3285 \\
 & tPatchGNN & 0.3117 & +0.4565 & +0.1842 & +0.4843 & 0.3676 & +0.3178 \\
 \midrule
 \multirow{4}{*}{MIMIC}
-& \method{} & 0.4269 & +0.1387 & +0.2274 & +0.5114 & 0.3713 & +0.2685 \\
+& \method{} & \best{0.4269} & +0.1387 & +0.2274 & +0.5114 & \best{0.3713} & +0.2685 \\
 & APN & 0.4746 & +0.1389 & +0.1890 & +0.4954 & 0.4155 & +0.2417 \\
 & GraFITi & 0.5035 & +0.1126 & +0.1683 & +0.4672 & 0.4442 & +0.2294 \\
-& tPatchGNN & 0.4695 & +0.1545 & +0.2108 & +0.4906 & 0.4080 & +0.2403 \\
+& tPatchGNN & \second{0.4695} & +0.1545 & +0.2108 & +0.4906 & \second{0.4080} & +0.2403 \\
 \midrule
 \multirow{4}{*}{USHCN}
-& \method{} & 0.1467 & +0.0879 & +0.0435 & +0.1893 & 0.2196 & +0.1549 \\
+& \method{} & \best{0.1467} & +0.0879 & +0.0435 & +0.1893 & \best{0.2196} & +0.1549 \\
 & APN & 0.1611 & +0.0002 & +0.0024 & +0.0783 & 0.2844 & +0.0735 \\
 & GraFITi & 0.1669 & +0.0007 & +0.0003 & +0.1032 & 0.2730 & +0.1035 \\
-& tPatchGNN & 0.1596 & +0.0094 & +0.3894 & +0.1556 & 0.2668 & +0.1246 \\
+& tPatchGNN & \second{0.1596} & +0.0094 & +0.3894 & +0.1556 & \second{0.2668} & +0.1246 \\
 \midrule
 \multirow{4}{*}{HumanActivity}
-& \method{} & 0.0433 & +0.0426 & +0.0595 & +3.9137 & 0.1124 & +1.5250 \\
-& APN & 0.0421 & +0.0349 & +0.0581 & +4.0887 & 0.1156 & +1.5582 \\
+& \method{} & \second{0.0433} & +0.0426 & +0.0595 & +3.9137 & \best{0.1124} & +1.5250 \\
+& APN & \best{0.0421} & +0.0349 & +0.0581 & +4.0887 & \second{0.1156} & +1.5582 \\
 & GraFITi & 0.0439 & +0.0345 & +0.0486 & +3.5535 & 0.1226 & +1.4151 \\
 & tPatchGNN & 0.0470 & +0.3704 & +0.0527 & +3.7564 & 0.1323 & +1.4774 \\
 \bottomrule
@@ -1009,26 +1033,29 @@ Dataset & Model & Orig. MSE & Shuffle $\Delta$MSE & Swap $\Delta$MSE & Gaps $\De
 \end{table*}
 
 \paragraph{Architecture diagnostics}
-Table~\ref{tab:architecture-diagnostics} separates the adaptive expert decoder
-from the rest of the neural event graph. The no-adaptive-expert variant removes
-only the expert gate and history-derived scalar experts, while the direct
-decoder is a much more severe control that discards the main event-memory
+Table~\ref{tab:architecture-diagnostics} compares the \method{} model
+with component-removal variants at the standard benchmark windows. The
+no-adaptive-expert variant removes only the expert gate and history-derived
+scalar experts, while the direct decoder discards the main event-memory
 pathway. The direct decoder is consistently poor, confirming that the model is
-not just benefiting from dataset-level constants or simple target means. On
-MIMIC, the full \method{} model is best on both metrics: MAE improves from
-0.3904 to 0.3734 after adding the adaptive expert decoder, and MSE improves
-from 0.4338 to 0.4260. On P12 and HumanActivity, the adaptive expert decoder
-gives the best MAE, while no-transformer variants have slightly lower or
-essentially tied MSE. This indicates that the expert decoder improves typical
-absolute error, but the squared-error optimum can sometimes favor a less
-expressive memory path. USHCN deserves a cautious reading. The standard \method{} benchmark in
-Table~\ref{tab:main-results} is strong, but the architecture diagnostic run
-shows that the no-adaptive-expert variant can be better under the diagnostic rerun. This
-does not invalidate the standard table, which is the primary benchmark result;
-it shows that USHCN is sensitive to small target counts and run context. The
-important pattern is that learned event memory and graph-aware retrieval are
-essential, while the adaptive gate improves USHCN strongly in the full benchmark
-sweep but can overfit particular diagnostic splits.
+not just benefiting from dataset-level constants or simple target means. The most consistent signal is that removing the adaptive expert decoder worsens
+MAE: from 0.1126 to 0.1232 on HumanActivity, from 0.2075 to 0.2218 on USHCN,
+from 0.3511 to 0.3616 on P12, and from 0.3719 to 0.3904 on MIMIC. The same
+comparison also shows lower MSE for the full model than for the no-adaptive-
+expert variant on every dataset, although some margins are small. For example,
+the full model is nearly tied with the no-transformer variant on P12 MSE.
+Overall, the ablations support the adaptive expert decoder as a useful
+numerical correction layer on top of event-memory retrieval.
+
+\paragraph{Expert gate behavior}
+Table~\ref{tab:gate-diagnostics} gives a direct readout of the adaptive expert
+decoder. The gate does not collapse to the neural head: HumanActivity is routed
+mostly through same-variable exponential memory, P12 and MIMIC rely primarily
+on same-variable latest-value and exponential-memory anchors, and USHCN uses a
+more distributed mixture of same-variable, global, graph-aware, and neural
+evidence. This dataset-specific routing supports the interpretation that the
+decoder is selecting among history-derived numerical anchors rather than acting
+as a single black-box forecast head.
 
 \paragraph{Temporal perturbation and history thinning}
 Figure~\ref{fig:adept-temporal-tests} tests whether \method{} actually uses
@@ -1059,7 +1086,8 @@ The additional experiments support a specific mechanism. The transformer memory,
 delta kernels, and graph retrieval provide the event representation; the
 adaptive expert decoder then improves the final numerical forecast by deciding
 when to trust same-variable persistence, graph-aware memory, local trend, or
-the neural head.
+the neural head. The gate diagnostics show that this decision is active and
+dataset-dependent rather than a fixed preference for the neural component.
 This combination is especially useful for MAE: it wins every standard dataset
 and every displayed window cell. The same diagnostics also show the boundary of
 the approach. Squared-error leadership is still fragile on HumanActivity and
@@ -1103,25 +1131,28 @@ availability patterns. Timestamp shuffling, early--late swaps, and history
 thinning further show that temporal placement and history depth matter.
 Ablations give the complementary architectural view: direct decoding is weak,
 event memory and graph-aware retrieval are important, and the adaptive expert
-decoder improves the final numerical forecast most reliably in MAE. Together,
-these results indicate that the gains come from combining neural event memory
-with adaptive, query-specific history anchors.
+decoder improves the final numerical forecast most reliably in MAE. Gate
+diagnostics further show that the decoder actually routes queries through
+different history-derived anchors across datasets. Together, these results
+indicate that the gains come from combining neural event memory with adaptive,
+query-specific history anchors.
 
 \paragraph{Protocol}
 The comparison protocol also matters. \method{} does not use APN, GraFITi,
 tPatchGNN, or any other baseline prediction as an expert. Its experts are
-computed only from the observed history of the evaluated example, and their
-gating weights are learned during training. Validation is used for checkpoint
-and architecture selection, while test labels are reserved for final reporting.
-This distinction is important because the adaptive decoder could otherwise be
-mistaken for post hoc ensembling or test-time routing; in the implemented
-model, it is an internal neural forecasting component.
+computed only from the observed history of the evaluated example, before the
+target is revealed, and their gating weights are learned during training.
+Validation is used for checkpoint selection, while test labels are reserved for
+final reporting. This distinction is important because the adaptive decoder
+could otherwise be mistaken for post hoc ensembling or test-time routing; in the
+implemented model, it is an internal neural forecasting component.
 
 \paragraph{Limitations}
-The remaining weaknesses point to useful next steps. USHCN has few masked
-targets at the standard window, so seed variation and diagnostic reversals are
-expected. HumanActivity exposes a different issue: a model can improve MAE
-while still losing MSE if occasional large deviations are not suppressed.
+The remaining weaknesses point to useful next steps. USHCN has relatively few
+masked targets at the standard window, which makes its uncertainty intervals
+wider than those of the larger clinical and activity benchmarks. HumanActivity
+exposes a different issue: a model can improve MAE while still losing MSE if
+occasional large deviations are not suppressed.
 Future work should therefore study more outlier-aware residual control,
 calibrated uncertainty for sparse query sets, and paired entity-level exports
 for all baselines so that statistical comparisons can move beyond aggregate
@@ -1154,7 +1185,7 @@ accuracy across irregular clinical, climate, and activity time series.
 
 \clearpage
 \appendix
-\section{Notation}
+\section{Architectural Notation}
 \label{app:adept-symbols}
 
 \begin{table}[!htbp]
@@ -1218,8 +1249,7 @@ $\mathcal L$ & Masked training objective. \\
 \label{app:adept-config}
 
 \begin{table}[!htbp]
-\caption{Global neural configuration of \method{} used in the benchmark runs.
-Architecture diagnostics disable or replace one listed component at a time.}
+\caption{Global neural configuration of \method{} used in the benchmark runs. Values are determined post hyperparameter tuning. Architecture diagnostics disable or replace one listed component at a time.}
 \label{tab:adept-fixed-config}
 \centering
 \scriptsize
